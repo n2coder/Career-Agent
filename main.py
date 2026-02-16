@@ -677,7 +677,12 @@ async def query_endpoint(request: Request):
     except ValueError:
         return JSONResponse(status_code=400, content={"answer": "Invalid JSON payload.", "sources": []})
     except Exception:
-        return JSONResponse(status_code=500, content={"answer": "Request processing failed.", "sources": []})
+        req_id = getattr(request.state, "request_id", "-")
+        logger.exception("query_endpoint_failed request_id=%s", req_id)
+        return JSONResponse(
+            status_code=500,
+            content={"answer": "Request processing failed.", "sources": [], "request_id": req_id},
+        )
 
 
 if __name__ == "__main__":
