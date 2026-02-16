@@ -1,6 +1,10 @@
 # Lin.O - Indian Job RAG Agent
 
 AI-powered career assistant for India-focused job guidance, resume analysis, fresher resume creation, roadmap planning, and monitoring-ready operations.
+<img width="1954" height="1264" alt="1" src="https://github.com/user-attachments/assets/ea1aba95-2362-4b4f-84d7-e883ed660dd7" />
+<img width="1375" height="1250" alt="2" src="https://github.com/user-attachments/assets/837b8bdd-c202-43bd-bc3c-91f2f30656cd" />
+<img width="614" height="928" alt="3" src="https://github.com/user-attachments/assets/f2447419-1e94-4912-b2a1-5cef84351c02" />
+<img width="2476" height="1234" alt="4" src="https://github.com/user-attachments/assets/957ccd54-dda6-4c80-b240-50d4204b04b1" />
 
 ## Highlights
 
