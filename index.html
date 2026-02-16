@@ -731,6 +731,7 @@
             return `${protocol}//${host}`;
         }
         const API_BASE = detectApiBase();
+        const API_KEY_PROMPT_ENABLED = false;
         const MIN_THINK_MS = 700;
         const TYPE_DELAY_MS = 12;
         const PAGE_CHAR_LIMIT = 2600;
@@ -752,6 +753,10 @@
         function showApiKeyPanel(show) {
             const panel = document.getElementById("api-key-panel");
             if (!panel) return;
+            if (!API_KEY_PROMPT_ENABLED) {
+                panel.classList.add("hidden");
+                return;
+            }
             panel.classList.toggle("hidden", !show);
             if (show) {
                 const input = document.getElementById("apiKeyInput");
