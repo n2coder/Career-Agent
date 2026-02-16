@@ -720,7 +720,7 @@ class RecruitmentEngine:
                 out_lines.append(ln)
                 continue
             # If KB does not provide explicit salary ranges, do not allow any currency/CTC range claims.
-            if not salary_ranges and re.search(r"(?i)\b(lpa|ctc|package|inr|?|rs\.)\b", s):
+            if not salary_ranges and re.search(r"(?i)\b(lpa|ctc|package|inr|rs\.?)\b", s):
                 if re.search(r"[\d]", s):
                     continue
             # Detect LPA ranges in output.
@@ -1521,4 +1521,5 @@ class RecruitmentEngine:
             user_query,
             use_profile_context=should_use_profile,
         )
+
 
