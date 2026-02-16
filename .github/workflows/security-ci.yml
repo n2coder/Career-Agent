@@ -65,7 +65,14 @@ jobs:
         run: pip freeze > dependency_snapshot.txt
 
       - name: Dependency vulnerability audit (gate)
-        run: pip-audit -r requirements.txt --desc --progress-spinner off
+        run: python -m pip_audit -r requirements.txt --desc --progress-spinner off
+
+      - name: Ensure dependency snapshot artifact exists
+        if: always()
+        run: |
+          if [ ! -f dependency_snapshot.txt ]; then
+            echo "dependency snapshot missing (job failed before export step)" > dependency_snapshot.txt
+          fi
 
       - name: Upload security artifacts
         if: always()
