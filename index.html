@@ -1,0 +1,1516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lin.O | Naresh Chaudhary</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+    <style>
+        :root {
+            --bg-base: #F1F5F9;
+            --text-primary: #0F172A;
+            --accent-primary: #1D4ED8;
+            --accent-secondary: #64748B;
+            --card-bg: #FFFFFF;
+            --input-bg: #FFFFFF;
+            --border-light: #E5E7EB;
+            --hover-accent: #2563EB;
+            --sidebar-bg: #FFFFFF;
+            --card-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            --agent-avatar-url: url('/assets/lino-face.png');
+
+            /* Legacy aliases used in existing styles */
+            --bg-1: var(--bg-base);
+            --bg-2: #e8eef5;
+            --panel: var(--card-bg);
+            --panel-border: var(--border-light);
+            --primary-1: var(--accent-primary);
+            --primary-2: var(--hover-accent);
+            --text-main: var(--text-primary);
+            --text-soft: var(--accent-secondary);
+        }
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            color: var(--text-main);
+            font-size: 16px;
+            background:
+                radial-gradient(850px 450px at -10% -20%, #dbe6f3 10%, transparent 70%),
+                radial-gradient(650px 350px at 110% 0%, #e4ebf5 5%, transparent 75%),
+                linear-gradient(135deg, var(--bg-1), var(--bg-2));
+        }
+        .panel-shell {
+            background: var(--panel);
+            border: 1px solid var(--panel-border);
+            box-shadow: var(--card-shadow);
+            backdrop-filter: blur(6px);
+        }
+        .avatar-box {
+            width: 52px; height: 52px;
+            background: var(--agent-avatar-url) center/126% no-repeat;
+            border: 0;
+            border-radius: 14px;
+            box-shadow: var(--card-shadow);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+        .eyes, .nose { display: none; }
+
+        nav button {
+            color: var(--text-soft);
+            transition: transform .15s ease, background-color .15s ease, color .15s ease;
+        }
+        nav button:hover {
+            transform: translateX(4px);
+            background: #eef3fb;
+            color: var(--hover-accent);
+        }
+
+        .user-bubble {
+            background: var(--card-bg);
+            color: var(--text-primary);
+            padding: 1.25rem;
+            border-radius: 1.5rem;
+            border-bottom-right-radius: .45rem;
+            max-width: 85%;
+            font-size: 16px;
+            border: 1px solid var(--border-light);
+            box-shadow: var(--card-shadow);
+        }
+        .assistant-bubble {
+            background: var(--card-bg);
+            border: 1px solid var(--border-light);
+            color: var(--text-primary);
+            box-shadow: var(--card-shadow);
+            font-size: 16px;
+        }
+        .assistant-loading {
+            background: #f8fafc;
+            border: 1px solid var(--border-light);
+        }
+        .chat-input-shell {
+            border: 1px solid var(--border-light);
+            background: var(--input-bg);
+        }
+        .chat-input-shell:focus-within {
+            border-color: var(--hover-accent);
+            box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.15);
+        }
+        .send-btn {
+            background: var(--accent-primary);
+            color: #fff;
+        }
+        .send-btn:hover { background: var(--hover-accent); }
+
+        .ai-response p { margin: 0.35rem 0 0.7rem; line-height: 1.7; }
+        .ai-response h1, .ai-response h2, .ai-response h3 {
+            color: #0f172a;
+            margin: 0.8rem 0 0.45rem;
+            font-weight: 700;
+            line-height: 1.35;
+        }
+        .ai-response ul, .ai-response ol { margin: 0.45rem 0 0.75rem 1.25rem; }
+        .ai-response li { margin: 0.35rem 0; }
+        .ai-response strong { color: #0f172a; }
+        .ai-response a {
+            color: #2f5cab;
+            font-weight: 700;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+            word-break: normal;
+            overflow-wrap: break-word;
+        }
+        .ai-response a:hover {
+            color: #244b93;
+        }
+        .ai-response code {
+            background: #dbe5f6;
+            color: #2f4d88;
+            border-radius: 0.35rem;
+            padding: 0.1rem 0.35rem;
+            font-size: .85em;
+        }
+        .ai-response pre {
+            background: #f8fafc;
+            color: #334155;
+            border: 1px solid #e2e8f0;
+            padding: 0.8rem;
+            border-radius: 0.7rem;
+            overflow-x: auto;
+            margin: 0.7rem 0;
+        }
+        .ai-response pre code { background: transparent; color: inherit; padding: 0; }
+        .ai-response blockquote {
+            border-left: 3px solid #4f6db8;
+            margin: 0.65rem 0;
+            padding-left: 0.75rem;
+            color: #334155;
+        }
+        .next-page-btn {
+            margin-top: 0.9rem;
+            padding: 0.5rem 0.9rem;
+            border-radius: 0.7rem;
+            border: 1px solid #b8c7e2;
+            background: #e8edf7;
+            color: #2f4d88;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+            transition: all .15s ease;
+        }
+        .next-page-btn:hover {
+            background: #dbe5f4;
+            transform: translateY(-1px);
+        }
+        .next-page-label {
+            margin-top: 0.55rem;
+            font-size: 0.72rem;
+            color: #64748b;
+            font-weight: 600;
+        }
+        .resume-action-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 0.5rem;
+            align-items: stretch;
+        }
+        .resume-upload-btn,
+        .resume-clear-btn {
+            border-radius: 0.8rem;
+            min-height: 2.55rem;
+            padding: 0 0.9rem;
+            font-size: 0.8rem;
+            font-weight: 700;
+            border: 1px solid transparent;
+            line-height: 1;
+            white-space: nowrap;
+            transition: transform .15s ease, filter .15s ease, background-color .15s ease;
+        }
+        .resume-upload-btn {
+            background: var(--accent-primary);
+            color: #fff;
+        }
+        .resume-clear-btn {
+            background: var(--card-bg);
+            border-color: var(--border-light);
+            color: var(--accent-secondary);
+        }
+        .resume-upload-btn {
+            width: 100%;
+        }
+        .resume-clear-btn {
+            padding: 0 0.72rem;
+            font-size: 0.68rem;
+        }
+        .resume-upload-btn:hover,
+        .resume-clear-btn:hover {
+            transform: translateY(-1px);
+        }
+        .resume-upload-btn:hover {
+            background: var(--hover-accent);
+        }
+        .resume-clear-btn:hover {
+            border-color: var(--hover-accent);
+            color: var(--hover-accent);
+        }
+        .resume-status {
+            margin-top: 0.45rem;
+            font-size: 0.72rem;
+            color: #64748b;
+            line-height: 1.4;
+        }
+        .tool-locked {
+            opacity: 0.45;
+            cursor: not-allowed !important;
+            pointer-events: none;
+        }
+        .resume-download-fab {
+            position: sticky;
+            top: 0.55rem;
+            z-index: 15;
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 0.35rem;
+        }
+        .resume-download-fab button {
+            border-radius: 999px;
+            background: var(--accent-primary);
+            color: white;
+            border: 0;
+            padding: 0.45rem 0.75rem;
+            font-size: 0.74rem;
+            font-weight: 700;
+            box-shadow: var(--card-shadow);
+        }
+        .roadmap-scroll {
+            max-height: 258px;
+            overflow-y: auto;
+            padding-right: 4px;
+            scrollbar-width: thin;
+            scrollbar-color: #809bc8 #dbe5f4;
+        }
+        .roadmap-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .roadmap-scroll::-webkit-scrollbar-track {
+            background: #e8edf7;
+            border-radius: 999px;
+        }
+        .roadmap-scroll::-webkit-scrollbar-thumb {
+            background: #7892c1;
+            border-radius: 999px;
+        }
+        .roadmap-scroll::-webkit-scrollbar-thumb:hover {
+            background: #5c78af;
+        }
+        .fresher-form-card {
+            border: 1px solid #b8c7e2;
+            background: #f4f7fb;
+            border-radius: 1rem;
+            padding: 0.9rem;
+            margin-top: 0.55rem;
+        }
+        .fresher-form-card input,
+        .fresher-form-card select,
+        .fresher-form-card textarea {
+            width: 100%;
+            border: 1px solid #d1d5db;
+            border-radius: 0.7rem;
+            background: #fff;
+            padding: 0.6rem 0.7rem;
+            font-size: 0.82rem;
+            color: #334155;
+            outline: none;
+        }
+        .fresher-form-card textarea {
+            min-height: 88px;
+            resize: vertical;
+        }
+        .fresher-form-card label {
+            display: block;
+            font-size: 0.72rem;
+            color: #64748b;
+            font-weight: 700;
+            margin-bottom: 0.34rem;
+        }
+        .fresher-form-card .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.6rem;
+        }
+        .fresher-form-card .form-actions {
+            margin-top: 0.7rem;
+            display: flex;
+            gap: 0.5rem;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+        }
+        .fresher-btn {
+            border: 0;
+            border-radius: 0.72rem;
+            padding: 0.56rem 0.85rem;
+            font-size: 0.75rem;
+            font-weight: 800;
+            color: #fff;
+            background: linear-gradient(135deg, #274690, #5a74b8);
+        }
+        .fresher-btn-alt {
+            border: 1px solid #9eb3da;
+            border-radius: 0.72rem;
+            padding: 0.56rem 0.8rem;
+            font-size: 0.75rem;
+            font-weight: 800;
+            color: #2f4d88;
+            background: #e8edf7;
+        }
+
+        .dot { width: 6px; height: 6px; border-radius: 50%; background: #0ea5e9; animation: bounce 1.4s infinite ease-in-out; }
+        .dot { background: var(--accent-secondary); }
+        .text-blue-400 { color: var(--accent-secondary) !important; }
+        .text-blue-500 { color: var(--accent-primary) !important; }
+        .text-blue-600, .text-blue-700 { color: var(--text-primary) !important; }
+        .shadow-blue-100 { --tw-shadow-color: rgb(37 99 235 / 0.2) !important; }
+        .border-blue-100 { border-color: var(--border-light) !important; }
+        .bg-blue-50\/60 { background-color: #f8fafc !important; }
+
+        aside .panel-shell {
+            background:
+                linear-gradient(180deg, rgba(29, 78, 216, 0.18), rgba(100, 116, 139, 0.12)),
+                var(--sidebar-bg);
+            border-color: var(--border-light);
+        }
+        main.panel-shell {
+            background: var(--card-bg);
+            border-color: var(--border-light);
+        }
+        nav button i {
+            color: var(--accent-secondary) !important;
+        }
+        /* Sidebar readability: map light gray text to near-black */
+        aside .text-slate-300,
+        aside .text-slate-400,
+        aside .text-slate-500,
+        aside .text-slate-600 {
+            color: #0f172a !important;
+        }
+        aside nav button,
+        aside .resume-status,
+        aside #api-key-hint,
+        aside #career-tools-title {
+            color: #0f172a !important;
+        }
+        aside nav button.resume-upload-btn,
+        aside nav button.fresher-btn,
+        aside nav button.resume-upload-btn i,
+        aside nav button.fresher-btn i {
+            color: #fff !important;
+        }
+        #status-card,
+        #api-key-panel,
+        #resume-upload-card,
+        #developer-footer,
+        #mobile-main-header,
+        .composer-wrap {
+            border-color: var(--border-light) !important;
+        }
+        #status-card,
+        #api-key-panel,
+        #resume-upload-card,
+        #mobile-main-header {
+            background: var(--card-bg) !important;
+            box-shadow: var(--card-shadow);
+        }
+        #api-key-panel button {
+            background: var(--accent-primary) !important;
+        }
+        #api-key-panel button:hover {
+            background: var(--hover-accent) !important;
+        }
+        .dot:nth-child(2) { animation-delay: 0.2s; }
+        .dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+
+
+        @media (max-width: 1024px) {
+            body {
+                height: 100dvh;
+                padding: 0.5rem;
+                gap: 0.45rem;
+                overflow: hidden;
+            }
+            aside {
+                width: 100%;
+                height: auto !important;
+                flex: 0 0 auto;
+            }
+            aside .panel-shell {
+                border-radius: 1.8rem;
+                padding: 0.58rem 0.62rem 0.3rem;
+                height: auto !important;
+                overflow: hidden;
+            }
+            #status-card { display: none; }
+            #quick-roadmaps-section { display: none; }
+            #career-tools-section { margin-top: 0; }
+            #sidebar-nav {
+                margin-top: 0.12rem;
+                flex: 0 0 auto !important;
+                overflow: hidden;
+                padding-right: 0;
+            }
+            #sidebar-nav > :not([hidden]) ~ :not([hidden]) {
+                margin-top: 0.35rem !important;
+            }
+            #brand-row {
+                justify-content: center;
+                align-items: center;
+                gap: 0.62rem;
+                margin-bottom: 0.35rem;
+            }
+            #brand-meta {
+                display: flex;
+                flex-direction: column;
+                align-items: flex-start;
+                justify-content: center;
+            }
+            .avatar-box {
+                width: 40px;
+                height: 40px;
+                border-radius: 12px;
+            }
+            #brand-title {
+                font-size: 1.1rem;
+                line-height: 1.2;
+                margin: 0;
+            }
+            #brand-tagline {
+                font-size: 0.58rem;
+                letter-spacing: 0.08em;
+                margin-top: 0.16rem;
+                line-height: 1;
+            }
+            #career-tools-title {
+                margin-bottom: 0.14rem;
+                font-size: 0.56rem;
+            }
+            #resume-upload-card {
+                margin-bottom: 0.14rem;
+                padding: 0.3rem;
+                border-radius: 0.9rem;
+            }
+            .resume-upload-btn,
+            .resume-clear-btn {
+                min-height: 2.2rem;
+                padding: 0 0.55rem;
+                border-radius: 0.72rem;
+                font-size: 0.64rem;
+            }
+            .resume-clear-btn {
+                padding: 0 0.52rem;
+                font-size: 0.62rem;
+            }
+            .resume-status {
+                margin-top: 0.24rem;
+                font-size: 0.58rem;
+                line-height: 1.32;
+            }
+            #career-tools-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 0.4rem;
+            }
+            #career-tools-grid .career-tool-btn,
+            #analyze-profile-btn {
+                padding: 0.56rem 0.52rem;
+                border-radius: 0.8rem;
+                font-size: 0.68rem;
+                line-height: 1.2;
+            }
+            #career-tools-grid .career-tool-btn i,
+            #analyze-profile-btn i { width: 0.9rem; }
+            #analyze-profile-btn { margin-top: 0.28rem; }
+            #developer-footer { display: none; }
+            main.panel-shell {
+                min-height: 0;
+                flex: 1 1 auto;
+                border-radius: 1.8rem;
+            }
+            #mobile-main-header { display: none; }
+            #chat-history {
+                padding: 0.58rem;
+                padding-top: 0.66rem;
+                gap: 0.6rem;
+            }
+            #chat-history .assistant-bubble,
+            #chat-history .user-bubble { max-width: 92%; }
+            .composer-wrap {
+                position: sticky;
+                bottom: 0;
+                padding: 0.48rem;
+                padding-top: 0.2rem;
+                background: linear-gradient(to top, rgba(255,255,255,0.95), rgba(255,255,255,0.72));
+                backdrop-filter: blur(2px);
+            }
+            #userInput {
+                padding-left: 0.9rem;
+                padding-right: 0.4rem;
+                padding-top: 0.8rem;
+                padding-bottom: 0.8rem;
+                font-size: 0.78rem;
+            }
+            .send-btn {
+                width: 2.7rem;
+                height: 2.7rem;
+                border-radius: 0.85rem;
+            }
+            #mobile-footer {
+                display: block;
+                text-align: center;
+                color: #64748b;
+                font-size: 0.66rem;
+                letter-spacing: 0.08em;
+                font-weight: 800;
+                text-transform: none;
+                margin-top: 0.2rem;
+                line-height: 1.1;
+                opacity: 1;
+            }
+            #mobile-footer span { color: #274690; font-weight: 800; }
+        }
+
+        #mobile-footer {
+            display: block;
+            text-align: center;
+            color: #64748b;
+            font-size: 0.7rem;
+            letter-spacing: 0.08em;
+            font-weight: 800;
+            margin-top: 0.28rem;
+            line-height: 1.1;
+        }
+        #mobile-footer span { color: #274690; font-weight: 800; }
+    </style>
+</head>
+<body class="flex flex-col lg:flex-row h-screen p-4 lg:p-6 gap-6">
+
+    <aside class="w-full lg:w-72 flex flex-col gap-4 shrink-0 h-full">
+        <div class="panel-shell p-6 rounded-[2.5rem] flex flex-col h-full">
+            <div id="brand-row" class="flex items-center gap-3 mb-2">
+                <div class="avatar-box shadow-lg shadow-blue-100">
+                    <div class="eyes"><div class="eye"></div><div class="eye"></div></div>
+                    <div class="nose"></div>
+                </div>
+                <div id="brand-meta">
+                    <h1 id="brand-title" class="text-xl font-bold text-slate-800">Lin.O</h1>
+                    <p id="brand-tagline" class="text-[10px] text-blue-500 font-bold uppercase tracking-widest">By N2CODER</p>
+                </div>
+            </div>
+
+            <div id="status-card" class="mt-4 p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-2">
+                <div class="flex items-center justify-between text-[10px] font-bold uppercase text-slate-400">
+                    <span>LLM Status</span>
+                    <span id="llm-status" class="text-amber-500 italic">Checking...</span>
+                </div>
+                <div class="flex items-center justify-between text-[10px] font-bold uppercase text-slate-400">
+                    <span>Ready State</span>
+                    <span id="agent-ready" class="text-amber-500 italic">Initializing...</span>
+                </div>
+            </div>
+
+            <div id="api-key-panel" class="mt-3 p-3 rounded-xl border border-blue-100 bg-blue-50/60 hidden">
+                <p class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-2">API Key</p>
+                <div class="flex items-center gap-2">
+                    <input id="apiKeyInput" type="password" class="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-none" placeholder="Enter APP_API_KEY" />
+                    <button onclick="saveApiKey()" class="rounded-xl px-3 py-2 text-xs font-extrabold text-white" style="background: var(--accent-primary);">
+                        Save
+                    </button>
+                </div>
+                <p id="api-key-hint" class="mt-2 text-[11px] font-semibold text-slate-500">
+                    Use the <b>APP_API_KEY</b> from your <code>.env</code>. Not your OpenAI key.
+                </p>
+                <p id="api-conn-hint" class="mt-2 text-[11px] font-semibold text-rose-600 hidden"></p>
+            </div>
+            
+            <nav id="sidebar-nav" class="mt-6 space-y-6 flex-1 overflow-y-auto pr-2">
+                <div id="quick-roadmaps-section">
+                    <p class="text-[10px] font-bold text-slate-300 uppercase px-2 mb-2 tracking-wider">Quick Roadmaps</p>
+                    <div class="space-y-1 roadmap-scroll">
+                        <button onclick="quickAsk('Frontend Developer Roadmap')" class="w-full text-left p-3 rounded-xl hover:bg-slate-50 text-sm font-medium transition-all flex items-center gap-3 text-slate-600"><i class="fa-solid fa-code text-blue-400 w-4"></i> Frontend Developer</button>
+                        <button onclick="quickAsk('Backend Developer Roadmap')" class="w-full text-left p-3 rounded-xl hover:bg-slate-50 text-sm font-medium transition-all flex items-center gap-3 text-slate-600"><i class="fa-solid fa-database text-blue-400 w-4"></i> Backend Developer</button>
+                        <button onclick="quickAsk('Full Stack Developer Roadmap')" class="w-full text-left p-3 rounded-xl hover:bg-slate-50 text-sm font-medium transition-all flex items-center gap-3 text-slate-600"><i class="fa-solid fa-layer-group text-blue-400 w-4"></i> Full Stack Developer</button>
+                        <button onclick="quickAsk('Data Scientist Roadmap')" class="w-full text-left p-3 rounded-xl hover:bg-slate-50 text-sm font-medium transition-all flex items-center gap-3 text-slate-600"><i class="fa-solid fa-chart-line text-blue-400 w-4"></i> Data Scientist</button>
+                        <button onclick="quickAsk('Machine Learning Engineer Roadmap')" class="w-full text-left p-3 rounded-xl hover:bg-slate-50 text-sm font-medium transition-all flex items-center gap-3 text-slate-600"><i class="fa-solid fa-brain text-blue-400 w-4"></i> ML Engineer</button>
+                        <button onclick="quickAsk('DevOps Engineer Roadmap')" class="w-full text-left p-3 rounded-xl hover:bg-slate-50 text-sm font-medium transition-all flex items-center gap-3 text-slate-600"><i class="fa-solid fa-server text-blue-400 w-4"></i> DevOps Engineer</button>
+                        <button onclick="quickAsk('Cloud Engineer Roadmap')" class="w-full text-left p-3 rounded-xl hover:bg-slate-50 text-sm font-medium transition-all flex items-center gap-3 text-slate-600"><i class="fa-solid fa-cloud text-blue-400 w-4"></i> Cloud Engineer</button>
+                        <button onclick="quickAsk('Cybersecurity Analyst Roadmap')" class="w-full text-left p-3 rounded-xl hover:bg-slate-50 text-sm font-medium transition-all flex items-center gap-3 text-slate-600"><i class="fa-solid fa-shield-halved text-blue-400 w-4"></i> Cybersecurity Analyst</button>
+                        <button onclick="quickAsk('QA Automation Engineer Roadmap')" class="w-full text-left p-3 rounded-xl hover:bg-slate-50 text-sm font-medium transition-all flex items-center gap-3 text-slate-600"><i class="fa-solid fa-vial text-blue-400 w-4"></i> QA Automation Engineer</button>
+                        <button onclick="quickAsk('Mobile App Developer Roadmap')" class="w-full text-left p-3 rounded-xl hover:bg-slate-50 text-sm font-medium transition-all flex items-center gap-3 text-slate-600"><i class="fa-solid fa-mobile-screen-button text-blue-400 w-4"></i> Mobile App Developer</button>
+                    </div>
+                </div>
+
+                <div id="career-tools-section">
+                    <p id="career-tools-title" class="text-[10px] font-bold text-slate-300 uppercase px-2 mb-2 tracking-wider">Profile Tools</p>
+                    <div id="resume-upload-card" class="mb-3 p-3 rounded-xl border border-blue-100 bg-blue-50/60">
+                        <input id="resumeFileInput" type="file" accept=".pdf,.docx,.txt" class="hidden" />
+                        <div class="resume-action-row">
+                            <button onclick="openResumePicker()" class="resume-upload-btn flex items-center justify-center gap-2">
+                                <i class="fa-solid fa-upload"></i>
+                                Upload Resume
+                            </button>
+                            <button id="resume-clear-btn" onclick="clearResumeProfile()" class="resume-clear-btn flex items-center justify-center gap-2" title="Clear uploaded resume">
+                                <i class="fa-solid fa-xmark"></i>
+                                Clear
+                            </button>
+                        </div>
+                        <p id="resume-status-msg" class="resume-status">Upload resume to enable profile tools.</p>
+                        <p id="resume-user-greet" class="resume-status font-bold text-blue-700"></p>
+                    </div>
+                    <div id="career-tools-grid" class="space-y-1">
+                    <button id="analyze-profile-btn" onclick="quickAsk('Analyze my uploaded resume in depth and give a complete profile assessment: strengths, gaps, role fit, city strategy, salary band, and 90-day action plan.', { useProfileContext: true })" class="career-tool-btn tool-locked w-full text-left p-3 rounded-xl hover:bg-slate-50 text-sm font-medium transition-all flex items-center gap-3 text-slate-600" disabled><i class="fa-solid fa-user-check text-blue-400 w-4"></i> Analyze My Profile</button>
+                        <button onclick="quickAsk('Generate my best ATS-friendly resume draft from our discussion and profile.', { useProfileContext: true, resumeBuilder: true })" class="career-tool-btn tool-locked w-full text-left p-3 rounded-xl hover:bg-slate-50 text-sm font-medium transition-all flex items-center gap-3 text-slate-600" disabled><i class="fa-solid fa-file-pen text-blue-400 w-4"></i> Resume Builder</button>
+                        <button onclick="quickAsk('Use my resume profile and suggest targeted skill upgrades with timeline and priorities.', { useProfileContext: true })" class="career-tool-btn tool-locked w-full text-left p-3 rounded-xl hover:bg-slate-50 text-sm font-medium transition-all flex items-center gap-3 text-slate-600" disabled><i class="fa-solid fa-arrow-up-right-dots text-blue-400 w-4"></i> Skill Upgrades</button>
+                    <button onclick="quickAsk('Based on my uploaded resume, what are realistic salary targets and city options in India for the next switch?', { useProfileContext: true })" class="career-tool-btn tool-locked w-full text-left p-3 rounded-xl hover:bg-slate-50 text-sm font-medium transition-all flex items-center gap-3 text-slate-600" disabled><i class="fa-solid fa-indian-rupee-sign text-blue-400 w-4"></i> Salary Insights</button>
+                    </div>
+                    <div class="mt-3 flex justify-center">
+                        <button onclick="startFresherResumeFlow()" class="fresher-btn flex items-center gap-2">
+                            <i class="fa-solid fa-graduation-cap"></i>
+                            Fresher Resume
+                        </button>
+                    </div>
+                </div>
+            </nav>
+
+            <div id="developer-footer" class="pt-4 border-t border-slate-100 text-center">
+                <p class="text-[10px] text-slate-300 font-medium tracking-tight">Developed by <span class="text-blue-500 font-bold">N2coder</span></p>
+            </div>
+        </div>
+    </aside>
+
+    <main class="panel-shell flex-1 flex flex-col rounded-[2.5rem] overflow-hidden">
+        <div id="mobile-main-header" class="lg:hidden p-4 border-b border-slate-100 flex items-center justify-between bg-white">
+            <div class="flex items-center gap-2">
+                <div class="avatar-box scale-75"><div class="eyes"><div class="eye"></div><div class="eye"></div></div><div class="nose"></div></div>
+                <span class="font-bold text-slate-800">Lin.O</span>
+            </div>
+            <span class="text-[10px] text-blue-500 font-bold">By N2CODER</span>
+        </div>
+
+        <div id="chat-history" class="flex-1 overflow-y-auto p-6 lg:p-10 space-y-8">
+            <div class="flex items-start gap-4">
+                <div class="avatar-box scale-90 shrink-0 shadow-sm"><div class="eyes"><div class="eye"></div><div class="eye"></div></div><div class="nose"></div></div>
+                <div class="assistant-bubble ai-response p-5 rounded-3xl rounded-tl-none max-w-[85%] text-sm leading-relaxed">
+                    Hi! I'm Lin.O. I can help with roadmaps, resumes, and job market trends. How are you doing?
+                </div>
+            </div>
+        </div>
+
+        <div class="composer-wrap p-6 lg:p-10 pt-0">
+            <div class="chat-input-shell flex items-center gap-2 p-2 rounded-3xl shadow-inner">
+                <input type="text" id="userInput" class="flex-1 bg-transparent px-6 py-4 text-sm outline-none placeholder:text-slate-300" placeholder="Ask Lin.O..." onkeypress="if(event.key === 'Enter') handleChat()">
+                <button onclick="handleChat()" class="send-btn h-14 w-14 rounded-2xl flex items-center justify-center text-white shadow-lg transition-all hover:scale-105 active:scale-95">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </div>
+            
+        </div>
+    </main>
+
+    <script>
+        const sleep = ms => new Promise(res => setTimeout(res, ms));
+        marked.setOptions({ gfm: true, breaks: true });
+        function detectApiBase() {
+            const host = (window.location && window.location.host) || "";
+            const protocol = (window.location && window.location.protocol) || "http:";
+            if (!host || protocol === "file:") {
+                return "http://localhost";
+            }
+            if (host.includes(":5500") || host.includes(":5501")) {
+                return "http://localhost";
+            }
+            return `${protocol}//${host}`;
+        }
+        const API_BASE = detectApiBase();
+        const MIN_THINK_MS = 700;
+        const TYPE_DELAY_MS = 12;
+        const PAGE_CHAR_LIMIT = 2600;
+        let activePagination = null;
+        let profileReady = false;
+        const resumeBuilderStore = {};
+        let thinkingTicker = null;
+        const fresherWizard = { active: false, step: 0, data: {} };
+        const fresherCareerMap = {
+            "Information Technology": ["Software Developer", "Frontend Developer", "Backend Developer", "Data Analyst", "QA Engineer", "Cybersecurity Analyst"],
+            "Finance": ["Financial Analyst", "Investment Analyst", "Risk Analyst", "Accounts Executive", "Audit Associate"],
+            "Telecom": ["Network Engineer", "RF Engineer", "Telecom Operations Analyst", "NOC Engineer"],
+            "Healthcare": ["Healthcare Data Analyst", "Clinical Research Associate", "Medical Coder", "Operations Coordinator"],
+            "E-commerce": ["Catalog Analyst", "Marketplace Operations Associate", "Growth Analyst", "Customer Experience Executive"],
+            "Banking": ["Banking Operations Associate", "Credit Analyst", "Compliance Analyst", "Relationship Associate"],
+            "Education": ["Instructional Designer", "Academic Coordinator", "Learning Support Specialist", "EdTech Operations Associate"]
+        };
+
+        function showApiKeyPanel(show) {
+            const panel = document.getElementById("api-key-panel");
+            if (!panel) return;
+            panel.classList.toggle("hidden", !show);
+            if (show) {
+                const input = document.getElementById("apiKeyInput");
+                if (input) input.focus();
+            }
+        }
+
+        function getApiKey() {
+             return (localStorage.getItem("APP_API_KEY") || "").trim();
+         }
+
+         function getSessionId() {
+             let sid = (localStorage.getItem("SESSION_ID") || "").trim();
+             if (!sid) {
+                 if (window.crypto && crypto.randomUUID) {
+                     sid = crypto.randomUUID();
+                 } else {
+                     sid = String(Date.now()) + "-" + Math.random().toString(16).slice(2);
+                 }
+                 localStorage.setItem("SESSION_ID", sid);
+             }
+             return sid;
+         }
+
+         function saveApiKey() {
+             const input = document.getElementById("apiKeyInput");
+             const val = (input && input.value ? input.value : "").trim();
+             if (!val) return;
+             localStorage.setItem("APP_API_KEY", val);
+             showApiKeyPanel(false);
+             const hint = document.getElementById("api-conn-hint");
+             if (hint) hint.classList.add("hidden");
+         }
+
+         function authHeaders(extra = {}) {
+             const key = getApiKey();
+             const sid = getSessionId();
+             const headers = { ...extra, "X-Session-Id": sid };
+             return key ? { ...headers, "X-API-Key": key } : headers;
+         }
+
+         async function typeMarkdown(container, markdownText) {
+            const fullText = String(markdownText || "");
+            const step = Math.max(3, Math.floor(fullText.length / 260));
+            let i = 0;
+            const historyEl = document.getElementById("chat-history");
+
+            const makeLinksOpenInNewTab = (root) => {
+                if (!root) return;
+                root.querySelectorAll("a[href]").forEach((a) => {
+                    const href = (a.getAttribute("href") || "").trim();
+                    if (/^https?:\/\//i.test(href)) {
+                        a.setAttribute("target", "_blank");
+                        a.setAttribute("rel", "noopener noreferrer");
+                    }
+                });
+            };
+
+            while (i < fullText.length) {
+                i = Math.min(i + step, fullText.length);
+                const partial = fullText.slice(0, i);
+                container.innerHTML = DOMPurify.sanitize(marked.parse(partial));
+                makeLinksOpenInNewTab(container);
+                if (historyEl) {
+                    historyEl.scrollTop = historyEl.scrollHeight;
+                }
+                await sleep(TYPE_DELAY_MS);
+            }
+        }
+
+        function splitIntoPages(text, maxChars = PAGE_CHAR_LIMIT) {
+            const value = String(text || "").trim();
+            return value ? [value] : [];
+        }
+
+        function canAutoLoadNext(historyEl) {
+            return historyEl.scrollHeight - historyEl.scrollTop - historyEl.clientHeight < 140;
+        }
+
+        function nudgeToReadablePosition(historyEl) {
+            if (!historyEl) return;
+            historyEl.scrollTo({ top: historyEl.scrollHeight, behavior: "smooth" });
+        }
+
+        function inferThinkingSteps(query, options = {}) {
+            const q = String(query || "").toLowerCase();
+            const isProfile = !!options.useProfileContext || /\b(resume|profile|skills|experience|ats|builder)\b/.test(q);
+            const steps = [];
+
+            if (isProfile) steps.push("Analyzing your profile");
+            if (/\broadmap|plan|month|week|transition|upgrade|upskill\b/.test(q)) steps.push("Building your roadmap");
+            if (/\bsalary|market|job|hiring|city|companies|switch\b/.test(q)) steps.push("Checking the job market");
+            if (/\brole|fit|match|suitable|target\b/.test(q) || isProfile) steps.push("Finding suitable options");
+            steps.push("Structuring your response");
+
+            const dedup = [];
+            for (const s of steps) if (!dedup.includes(s)) dedup.push(s);
+            return dedup;
+        }
+
+        function startThinkingTicker(targetEl, steps) {
+            if (!targetEl) return;
+            if (thinkingTicker) clearInterval(thinkingTicker);
+            const sequence = (steps && steps.length) ? steps : ["Thinking"];
+            let idx = 0;
+            targetEl.textContent = sequence[0] + "...";
+            thinkingTicker = setInterval(() => {
+                idx = (idx + 1) % sequence.length;
+                targetEl.textContent = sequence[idx] + "...";
+            }, 1100);
+        }
+
+        function stopThinkingTicker() {
+            if (thinkingTicker) {
+                clearInterval(thinkingTicker);
+                thinkingTicker = null;
+            }
+        }
+
+        function setCareerToolsEnabled(enabled) {
+            profileReady = enabled;
+            document.querySelectorAll(".career-tool-btn").forEach(btn => {
+                btn.disabled = !enabled;
+                btn.classList.toggle("tool-locked", !enabled);
+            });
+        }
+
+        async function checkResumeStatus() {
+            try {
+                const r = await fetch(`${API_BASE}/resume/status`, { headers: authHeaders() });
+                const data = await r.json();
+                if (data.uploaded && data.name) {
+                    setCareerToolsEnabled(true);
+                    document.getElementById("resume-status-msg").innerText = "Resume uploaded. Profile tools enabled.";
+                    document.getElementById("resume-user-greet").innerText = `Hi ${data.name}`;
+                    return;
+                }
+            } catch (err) {
+                // Keep current UI state on errors (status call will show connection error).
+                return;
+            }
+            setCareerToolsEnabled(false);
+            document.getElementById("resume-status-msg").innerText = "Upload resume to enable profile tools.";
+            document.getElementById("resume-user-greet").innerText = "";
+        }
+
+        function openResumePicker() {
+            document.getElementById("resumeFileInput").click();
+        }
+
+        async function clearResumeProfile() {
+            if (!profileReady) {
+                document.getElementById("resume-status-msg").innerText = "No resume uploaded yet.";
+                return;
+            }
+            try {
+                const r = await fetch(`${API_BASE}/resume/clear`, { method: "POST", headers: authHeaders() });
+                const data = await r.json();
+                if (!r.ok || !data.ok) throw new Error(data.message || "Clear failed.");
+                setCareerToolsEnabled(false);
+                document.getElementById("resume-status-msg").innerText = "Resume cleared. Upload resume to enable profile tools.";
+                document.getElementById("resume-user-greet").innerText = "";
+                Object.keys(resumeBuilderStore).forEach(k => delete resumeBuilderStore[k]);
+                await checkResumeStatus();
+            } catch (err) {
+                document.getElementById("resume-status-msg").innerText = `Clear failed: ${err.message}`;
+            }
+        }
+
+        function appendAssistantBubbleHtml(html) {
+            const history = document.getElementById("chat-history");
+            const wrap = document.createElement("div");
+            wrap.className = "flex items-start gap-4";
+            wrap.innerHTML = `
+                <div class="avatar-box scale-90 shrink-0 shadow-sm"><div class="eyes"><div class="eye"></div><div class="eye"></div></div><div class="nose"></div></div>
+                <div class="assistant-bubble ai-response p-5 rounded-3xl rounded-tl-none max-w-[95%] text-sm leading-relaxed text-slate-700">${html}</div>
+            `;
+            history.appendChild(wrap);
+            nudgeToReadablePosition(history);
+            return wrap;
+        }
+
+        function appendUserBubble(text) {
+            const history = document.getElementById("chat-history");
+            const wrap = document.createElement("div");
+            wrap.className = "flex justify-end";
+            const bubble = document.createElement("div");
+            bubble.className = "user-bubble";
+            bubble.textContent = String(text || "").trim();
+            wrap.appendChild(bubble);
+            history.appendChild(wrap);
+            nudgeToReadablePosition(history);
+        }
+
+        function beginFresherWizard() {
+            fresherWizard.active = true;
+            fresherWizard.step = 1;
+            fresherWizard.data = {
+                fullName: "",
+                email: "",
+                phone: "",
+                educationOrg: "",
+                educationCourse: "",
+                educationYear: "",
+                careerCategory: "",
+                careerTitle: "",
+                projectName: "",
+                projectDetails: "",
+                skills: "",
+            };
+        }
+
+        function startFresherResumeFlow() {
+            beginFresherWizard();
+            appendAssistantBubbleHtml("<h3>Fresher Resume Builder</h3><p>Let's build your fresher resume step by step. Please answer one form at a time.</p>");
+            renderFresherStep();
+        }
+
+        function renderFresherStep() {
+            if (!fresherWizard.active) return;
+            const d = fresherWizard.data;
+            const step = fresherWizard.step;
+            let html = "";
+
+            if (step === 1) {
+                html = `<h3>Question 1 of 7</h3><p>Enter your full name.</p>
+                    <form class="fresher-form-card" id="fresher-step-1-form">
+                        <label>Full Name</label>
+                        <input id="fresher-fullname" type="text" required placeholder="e.g. Avinash Bhatnagar" value="${(d.fullName || "").replace(/"/g, "&quot;")}" />
+                        <div class="form-actions"><button class="fresher-btn" type="submit">Next</button></div>
+                    </form>`;
+            } else if (step === 2) {
+                html = `<h3>Question 2 of 7</h3><p>Enter your email ID.</p>
+                    <form class="fresher-form-card" id="fresher-step-2-form">
+                        <label>Email ID</label>
+                        <input id="fresher-email" type="email" required placeholder="you@example.com" value="${(d.email || "").replace(/"/g, "&quot;")}" />
+                        <div class="form-actions"><button class="fresher-btn" type="submit">Next</button></div>
+                    </form>`;
+            } else if (step === 3) {
+                html = `<h3>Question 3 of 7</h3><p>Enter your phone number.</p>
+                    <form class="fresher-form-card" id="fresher-step-3-form">
+                        <label>Phone Number</label>
+                        <input id="fresher-phone" type="text" required placeholder="+91-XXXXXXXXXX" value="${(d.phone || "").replace(/"/g, "&quot;")}" />
+                        <div class="form-actions"><button class="fresher-btn" type="submit">Next</button></div>
+                    </form>`;
+            } else if (step === 4) {
+                html = `<h3>Question 4 of 7</h3><p>Enter your education details.</p>
+                    <form class="fresher-form-card" id="fresher-step-4-form">
+                        <label>School/University Name</label>
+                        <input id="fresher-edu-org" type="text" required placeholder="Institute name" value="${(d.educationOrg || "").replace(/"/g, "&quot;")}" />
+                        <div class="grid-2" style="margin-top:0.55rem;">
+                            <div><label>Course Name</label><input id="fresher-edu-course" type="text" required placeholder="B.Tech / BCA / MBA..." value="${(d.educationCourse || "").replace(/"/g, "&quot;")}" /></div>
+                            <div><label>Passing Year</label><input id="fresher-edu-year" type="number" min="1990" max="2100" required placeholder="2026" value="${(d.educationYear || "").replace(/"/g, "&quot;")}" /></div>
+                        </div>
+                        <div class="form-actions"><button class="fresher-btn" type="submit">Next</button></div>
+                    </form>`;
+            } else if (step === 5) {
+                const categoryOptions = Object.keys(fresherCareerMap).map(cat => `<option value="${cat}" ${d.careerCategory === cat ? "selected" : ""}>${cat}</option>`).join("");
+                const titleOptions = (fresherCareerMap[d.careerCategory] || []).map(title => `<option value="${title}" ${d.careerTitle === title ? "selected" : ""}>${title}</option>`).join("");
+                html = `<h3>Question 5 of 7</h3><p>Select your target career area and role.</p>
+                    <form class="fresher-form-card" id="fresher-step-5-form">
+                        <label>Career Category</label>
+                        <select id="fresher-category" required><option value="">Select category</option>${categoryOptions}</select>
+                        <label style="margin-top:0.55rem;">Career Title</label>
+                        <select id="fresher-title" required><option value="">Select role</option>${titleOptions}</select>
+                        <div class="form-actions"><button class="fresher-btn" type="submit">Next</button></div>
+                    </form>`;
+            } else if (step === 6) {
+                html = `<h3>Question 6 of 7</h3><p>Add one project (optional). You can skip if you have not done any project yet.</p>
+                    <form class="fresher-form-card" id="fresher-step-6-form">
+                        <label>Project Name</label>
+                        <input id="fresher-project-name" type="text" placeholder="e.g. Student Attendance System" value="${(d.projectName || "").replace(/"/g, "&quot;")}" />
+                        <label style="margin-top:0.55rem;">Project Details</label>
+                        <textarea id="fresher-project-details" placeholder="Tech stack, what you built, your contribution">${d.projectDetails || ""}</textarea>
+                        <div class="form-actions">
+                            <button class="fresher-btn-alt" id="fresher-skip-project" type="button">Skip</button>
+                            <button class="fresher-btn" type="submit">Next</button>
+                        </div>
+                    </form>`;
+            } else if (step === 7) {
+                html = `<h3>Question 7 of 7</h3><p>Enter your skills (comma separated).</p>
+                    <form class="fresher-form-card" id="fresher-step-7-form">
+                        <label>Skills</label>
+                        <textarea id="fresher-skills" required placeholder="e.g. Python, SQL, Excel, Power BI, Communication">${d.skills || ""}</textarea>
+                        <div class="form-actions"><button class="fresher-btn" type="submit">Finish</button></div>
+                    </form>`;
+            } else {
+                html = `<h3>All details captured</h3>
+                    <div class="fresher-form-card">
+                        <p>Click below to generate your fresher resume draft.</p>
+                        <div class="form-actions" style="justify-content:center;">
+                            <button class="fresher-btn" id="fresher-build-resume" type="button">Build My Resume</button>
+                        </div>
+                    </div>`;
+            }
+
+            const wrap = appendAssistantBubbleHtml(html);
+
+            if (step === 1) {
+                wrap.querySelector("#fresher-step-1-form").addEventListener("submit", (e) => {
+                    e.preventDefault();
+                    const v = wrap.querySelector("#fresher-fullname").value.trim();
+                    if (!v) return;
+                    d.fullName = v;
+                    appendUserBubble(v);
+                    fresherWizard.step = 2;
+                    renderFresherStep();
+                });
+            } else if (step === 2) {
+                wrap.querySelector("#fresher-step-2-form").addEventListener("submit", (e) => {
+                    e.preventDefault();
+                    const v = wrap.querySelector("#fresher-email").value.trim();
+                    if (!v) return;
+                    d.email = v;
+                    appendUserBubble(v);
+                    fresherWizard.step = 3;
+                    renderFresherStep();
+                });
+            } else if (step === 3) {
+                wrap.querySelector("#fresher-step-3-form").addEventListener("submit", (e) => {
+                    e.preventDefault();
+                    const v = wrap.querySelector("#fresher-phone").value.trim();
+                    if (!v) return;
+                    d.phone = v;
+                    appendUserBubble(v);
+                    fresherWizard.step = 4;
+                    renderFresherStep();
+                });
+            } else if (step === 4) {
+                wrap.querySelector("#fresher-step-4-form").addEventListener("submit", (e) => {
+                    e.preventDefault();
+                    const org = wrap.querySelector("#fresher-edu-org").value.trim();
+                    const course = wrap.querySelector("#fresher-edu-course").value.trim();
+                    const year = wrap.querySelector("#fresher-edu-year").value.trim();
+                    if (!org || !course || !year) return;
+                    d.educationOrg = org;
+                    d.educationCourse = course;
+                    d.educationYear = year;
+                    appendUserBubble(`${course}, ${org} (${year})`);
+                    fresherWizard.step = 5;
+                    renderFresherStep();
+                });
+            } else if (step === 5) {
+                const categoryEl = wrap.querySelector("#fresher-category");
+                const titleEl = wrap.querySelector("#fresher-title");
+                categoryEl.addEventListener("change", () => {
+                    const cat = categoryEl.value;
+                    d.careerCategory = cat;
+                    const titles = fresherCareerMap[cat] || [];
+                    titleEl.innerHTML = `<option value="">Select role</option>` + titles.map(t => `<option value="${t}">${t}</option>`).join("");
+                });
+                wrap.querySelector("#fresher-step-5-form").addEventListener("submit", (e) => {
+                    e.preventDefault();
+                    const cat = categoryEl.value.trim();
+                    const title = titleEl.value.trim();
+                    if (!cat || !title) return;
+                    d.careerCategory = cat;
+                    d.careerTitle = title;
+                    appendUserBubble(`${cat} - ${title}`);
+                    fresherWizard.step = 6;
+                    renderFresherStep();
+                });
+            } else if (step === 6) {
+                wrap.querySelector("#fresher-step-6-form").addEventListener("submit", (e) => {
+                    e.preventDefault();
+                    d.projectName = wrap.querySelector("#fresher-project-name").value.trim();
+                    d.projectDetails = wrap.querySelector("#fresher-project-details").value.trim();
+                    appendUserBubble(d.projectName ? d.projectName : "No project added");
+                    fresherWizard.step = 7;
+                    renderFresherStep();
+                });
+                wrap.querySelector("#fresher-skip-project").addEventListener("click", () => {
+                    d.projectName = "";
+                    d.projectDetails = "";
+                    appendUserBubble("Skipped project section");
+                    fresherWizard.step = 7;
+                    renderFresherStep();
+                });
+            } else if (step === 7) {
+                wrap.querySelector("#fresher-step-7-form").addEventListener("submit", (e) => {
+                    e.preventDefault();
+                    const skills = wrap.querySelector("#fresher-skills").value.trim();
+                    if (!skills) return;
+                    d.skills = skills;
+                    appendUserBubble(skills);
+                    fresherWizard.step = 8;
+                    renderFresherStep();
+                });
+            } else {
+                wrap.querySelector("#fresher-build-resume").addEventListener("click", async () => {
+                    const profileBlock = [
+                        `Full Name: ${d.fullName}`,
+                        `Email: ${d.email}`,
+                        `Phone: ${d.phone}`,
+                        `Education: ${d.educationCourse}, ${d.educationOrg}, Passing Year ${d.educationYear}`,
+                        `Career Category: ${d.careerCategory}`,
+                        `Career Title: ${d.careerTitle}`,
+                        `Skills: ${d.skills}`,
+                        `Project Name: ${d.projectName || "N/A"}`,
+                        `Project Details: ${d.projectDetails || "N/A"}`
+                    ].join("\n");
+
+                    const resumePrompt = [
+                        "Create an ATS-friendly fresher resume in markdown ONLY.",
+                        "Do not include recommendations, links, notes, or extra sections.",
+                        "Use sections: ## Name, Contact line, ## Professional Summary, ## Skills, ## Education, ## Projects (if available), ## Certifications (optional), ## Target Roles.",
+                        "Keep bullets concise and recruiter-friendly.",
+                        "",
+                        profileBlock
+                    ].join("\n");
+
+                    const suggestionPrompt = [
+                        "Based on the fresher profile below, provide actionable recommendations.",
+                        "Use exactly these sections:",
+                        "## Recommended Projects",
+                        "## Recommended Certifications",
+                        "## Interview Preparation Plan",
+                        "## Targeted Companies",
+                        "## Learning Resources",
+                        "In Learning Resources provide 10 clean markdown links: **[Resource Name](https://...)**",
+                        "",
+                        profileBlock
+                    ].join("\n");
+
+                    fresherWizard.active = false;
+                    await quickAsk(resumePrompt, {
+                        useProfileContext: false,
+                        resumeBuilder: false,
+                        fresherFlow: true,
+                        fresherResumeOnly: true,
+                        fresherName: d.fullName || "fresher_resume"
+                    });
+                    await quickAsk(suggestionPrompt, {
+                        useProfileContext: false,
+                        resumeBuilder: false
+                    });
+                });
+            }
+        }
+
+        function detectResumeIntent(text) {
+            return /\b(resume|cv|profile|my skills|my experience|ats|rewrite|builder|cover letter)\b/i.test(text || "");
+        }
+
+        function extractResumeDraftMarkdown(answerText) {
+            const text = String(answerText || "").trim();
+            if (!text) return "";
+
+            const m = text.match(/##\s*Resume Draft\s*([\s\S]*?)(?=\n##\s+|$)/i);
+            if (m && m[1]) return m[1].trim();
+
+            // Fallback: if the output is mostly resume-like markdown, use as-is.
+            if (/##\s*(Professional Summary|Skills|Experience|Education)/i.test(text)) {
+                return text;
+            }
+            return "";
+        }
+
+        function cleanMdInline(text) {
+            return (text || "")
+                .replace(/\*\*(.*?)\*\*/g, "$1")
+                .replace(/\*(.*?)\*/g, "$1")
+                .replace(/`(.*?)`/g, "$1")
+                .replace(/\[(.*?)\]\((.*?)\)/g, "$1")
+                .replace(/\s+/g, " ")
+                .trim();
+        }
+
+        function parseResumeMarkdown(md) {
+            const lines = (md || "").split(/\r?\n/);
+            const parsed = {
+                name: "",
+                contact: "",
+                sections: [],
+            };
+
+            let current = null;
+            for (const raw of lines) {
+                const line = (raw || "").trim();
+                if (!line) continue;
+
+                if (line.startsWith("## ")) {
+                    const heading = cleanMdInline(line.slice(3));
+                    if (!parsed.name && heading && heading.toLowerCase() !== "name") {
+                        parsed.name = heading;
+                        current = null;
+                    } else {
+                        current = { title: heading, bullets: [], paragraphs: [] };
+                        parsed.sections.push(current);
+                    }
+                    continue;
+                }
+
+                if (!parsed.name) {
+                    parsed.name = cleanMdInline(line.replace(/^#\s+/, ""));
+                    continue;
+                }
+
+                if (/^contact\s*:/i.test(line)) {
+                    parsed.contact = cleanMdInline(line);
+                    continue;
+                }
+
+                if (!current) {
+                    current = { title: "Profile", bullets: [], paragraphs: [] };
+                    parsed.sections.push(current);
+                }
+
+                if (/^[-*]\s+/.test(line)) {
+                    current.bullets.push(cleanMdInline(line.replace(/^[-*]\s+/, "")));
+                } else {
+                    current.paragraphs.push(cleanMdInline(line));
+                }
+            }
+
+            if (!parsed.name) parsed.name = "Candidate Name";
+            return parsed;
+        }
+
+        function downloadResumePdf(key) {
+            const payload = resumeBuilderStore[key];
+            if (!payload || !payload.content) return;
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ unit: "pt", format: "a4" });
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+            const margin = 42;
+            const contentWidth = pageWidth - margin * 2;
+            const parsed = parseResumeMarkdown(payload.content);
+            let y = margin;
+
+            function ensureSpace(need = 18) {
+                if (y + need <= pageHeight - margin) return;
+                doc.addPage();
+                y = margin;
+            }
+
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(22);
+            const nameLines = doc.splitTextToSize(parsed.name, contentWidth);
+            for (const ln of nameLines) {
+                ensureSpace(28);
+                doc.text(ln, margin, y);
+                y += 26;
+            }
+
+            if (parsed.contact) {
+                doc.setFont("helvetica", "normal");
+                doc.setFontSize(11);
+                const contactLines = doc.splitTextToSize(parsed.contact, contentWidth);
+                for (const ln of contactLines) {
+                    ensureSpace(16);
+                    doc.text(ln, margin, y);
+                    y += 14;
+                }
+            }
+
+            y += 6;
+
+            for (const section of parsed.sections) {
+                ensureSpace(30);
+                doc.setFont("helvetica", "bold");
+                doc.setFontSize(13);
+                doc.text(section.title || "Section", margin, y);
+                y += 10;
+
+                doc.setDrawColor(210, 210, 210);
+                doc.setLineWidth(0.7);
+                doc.line(margin, y, pageWidth - margin, y);
+                y += 14;
+
+                doc.setFont("helvetica", "normal");
+                doc.setFontSize(11);
+
+                for (const para of section.paragraphs || []) {
+                    const paraLines = doc.splitTextToSize(para, contentWidth);
+                    for (const ln of paraLines) {
+                        ensureSpace(15);
+                        doc.text(ln, margin, y);
+                        y += 14;
+                    }
+                    y += 4;
+                }
+
+                for (const bullet of section.bullets || []) {
+                    const bulletLines = doc.splitTextToSize(bullet, contentWidth - 16);
+                    ensureSpace(16);
+                    doc.text("\u2022", margin, y);
+                    doc.text(bulletLines[0] || "", margin + 12, y);
+                    y += 14;
+                    for (let i = 1; i < bulletLines.length; i += 1) {
+                        ensureSpace(16);
+                        doc.text(bulletLines[i], margin + 12, y);
+                        y += 14;
+                    }
+                    y += 2;
+                }
+
+                y += 8;
+            }
+
+            const safeName = (payload.name || "resume").replace(/[^a-z0-9]+/gi, "_");
+            doc.save(`${safeName}_resume.pdf`);
+        }
+
+        async function handleResumeUpload(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+
+            const statusEl = document.getElementById("resume-status-msg");
+            const greetEl = document.getElementById("resume-user-greet");
+            statusEl.innerText = "Uploading and analyzing resume...";
+            greetEl.innerText = "";
+            setCareerToolsEnabled(false);
+
+            try {
+                const fd = new FormData();
+                fd.append("file", file);
+
+                const r = await fetch(`${API_BASE}/resume/upload`, {
+                    method: "POST",
+                    headers: authHeaders(),
+                    body: fd,
+                });
+                const data = await r.json();
+                if (!r.ok || !data.ok) {
+                    throw new Error(data.message || "Resume upload failed.");
+                }
+
+                setCareerToolsEnabled(true);
+                statusEl.innerText = "Resume uploaded. Profile tools enabled.";
+                greetEl.innerText = `Hi ${data.name}`;
+            } catch (err) {
+                statusEl.innerText = `Upload failed: ${err.message}`;
+                greetEl.innerText = "";
+                setCareerToolsEnabled(false);
+            } finally {
+                event.target.value = "";
+            }
+        }
+
+        // Initial status check
+        window.onload = async () => {
+            const history = document.getElementById('chat-history');
+            showApiKeyPanel(!getApiKey());
+            document.getElementById("resumeFileInput").addEventListener("change", handleResumeUpload);
+            history.addEventListener('scroll', async () => {
+                if (
+                    activePagination &&
+                    !activePagination.loading &&
+                    activePagination.hasMore() &&
+                    canAutoLoadNext(history)
+                ) {
+                    await activePagination.loadNext();
+                }
+            });
+
+            try {
+                let r = await fetch(`${API_BASE}/status`, { headers: authHeaders() });
+                if (r.status === 401) {
+                    localStorage.removeItem("APP_API_KEY");
+                    showApiKeyPanel(true);
+                    throw new Error("Unauthorized (missing/incorrect APP_API_KEY)");
+                }
+
+                if (!r.ok) {
+                    const txt = await r.text();
+                    throw new Error(`HTTP ${r.status}: ${txt}`);
+                }
+                const data = await r.json();
+                document.getElementById('llm-status').innerText = data.llm || "Connected";
+                document.getElementById('llm-status').className = "text-green-500 font-bold";
+                document.getElementById('agent-ready').innerText = data.ready ? "Active" : "Wait";
+                document.getElementById('agent-ready').className = "text-green-500 font-bold";
+            } catch (e) {
+                document.getElementById('llm-status').innerText = "Offline";
+                document.getElementById('llm-status').className = "text-red-500 font-bold";
+                document.getElementById('agent-ready').innerText = "Inactive";
+                document.getElementById('agent-ready').className = "text-red-500 font-bold";
+                const msg = (e && e.message) ? e.message : "Unknown error";
+                showApiKeyPanel(true);
+                const hint = document.getElementById("api-conn-hint");
+                if (hint) {
+                    hint.textContent = `Connection error: ${msg}`;
+                    hint.classList.remove("hidden");
+                }
+            }
+            await checkResumeStatus();
+        };
+
+        function quickAsk(text, options = {}) {
+            document.getElementById('userInput').value = text;
+            return handleChat(options);
+        }
+
+        async function handleChat(options = {}) {
+            const inputField = document.getElementById('userInput');
+            const q = inputField.value.trim();
+            const history = document.getElementById('chat-history');
+            if(!q) return;
+            activePagination = null;
+            inputField.value = "";
+            const useProfileContext = !!(options.useProfileContext || profileReady);
+            const resumeBuilder = !!options.resumeBuilder;
+            const fresherFlow = !!options.fresherFlow;
+            const fresherName = String(options.fresherName || "").trim();
+            const fresherResumeOnly = !!options.fresherResumeOnly;
+
+            const userWrap = document.createElement('div');
+            userWrap.className = "flex justify-end";
+            const userBubble = document.createElement('div');
+            userBubble.className = "user-bubble";
+            userBubble.textContent = q;
+            userWrap.appendChild(userBubble);
+            history.appendChild(userWrap);
+            nudgeToReadablePosition(history);
+            
+            const loadId = "load-" + Date.now();
+            const loaderWrap = document.createElement("div");
+            loaderWrap.className = "flex items-start gap-4 animate-pulse";
+            loaderWrap.id = loadId;
+            loaderWrap.innerHTML = `
+                <div class="avatar-box scale-90 shrink-0"><div class="eyes"><div class="eye"></div><div class="eye"></div></div><div class="nose"></div></div>
+                <div class="assistant-loading p-5 rounded-3xl">
+                    <div class="flex items-center gap-2">
+                        <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+                    </div>
+                    <div id="${loadId}-thinking" class="mt-2 text-xs font-semibold text-slate-500"></div>
+                </div>`;
+            history.appendChild(loaderWrap);
+            loaderWrap.scrollIntoView({ behavior: "smooth", block: "center" });
+            const thinkingEl = document.getElementById(`${loadId}-thinking`);
+            startThinkingTicker(thinkingEl, inferThinkingSteps(q, { useProfileContext }));
+            try {
+                const apiCall = fetch(`${API_BASE}/query`, {
+                    method: 'POST',
+                    headers: authHeaders({'Content-Type': 'application/json'}),
+                    body: JSON.stringify({
+                        query: q,
+                        use_profile_context: useProfileContext,
+                        resume_builder: resumeBuilder
+                    })
+                });
+
+                const [response] = await Promise.all([apiCall, sleep(MIN_THINK_MS)]); 
+                const data = await response.json();
+                const loaderEl = document.getElementById(loadId);
+                if (loaderEl) loaderEl.classList.remove("animate-pulse");
+                stopThinkingTicker();
+                
+                document.getElementById(loadId).innerHTML = `
+                    <div class="avatar-box scale-90 shrink-0 shadow-sm"><div class="eyes"><div class="eye"></div><div class="eye"></div></div><div class="nose"></div></div>
+                    <div class="assistant-bubble ai-response p-6 rounded-3xl rounded-tl-none max-w-[95%] text-sm leading-relaxed text-slate-700" id="${loadId}-content"></div>`;
+                const contentEl = document.getElementById(`${loadId}-content`);
+                nudgeToReadablePosition(history);
+
+                const responseText = String(data.answer || "").trim();
+                if (!responseText) {
+                    contentEl.textContent = "No response generated.";
+                    return;
+                }
+                await typeMarkdown(contentEl, responseText);
+
+                if (data.resume_builder && data.resume_builder.content_markdown) {
+                    resumeBuilderStore[loadId] = {
+                        name: data.resume_builder.name || "resume",
+                        content: data.resume_builder.content_markdown
+                    };
+                    const fab = document.createElement("div");
+                    fab.className = "resume-download-fab";
+                    const btn = document.createElement("button");
+                    btn.innerHTML = "<i class='fa-solid fa-download mr-1'></i> Download Resume PDF";
+                    btn.onclick = () => downloadResumePdf(loadId);
+                    fab.appendChild(btn);
+                    contentEl.prepend(fab);
+                } else if (fresherFlow) {
+                    const draftMd = fresherResumeOnly ? responseText : extractResumeDraftMarkdown(responseText);
+                    if (draftMd) {
+                        resumeBuilderStore[loadId] = {
+                            name: fresherName || "fresher_resume",
+                            content: draftMd
+                        };
+                        const fab = document.createElement("div");
+                        fab.className = "resume-download-fab";
+                        const btn = document.createElement("button");
+                        btn.innerHTML = "<i class='fa-solid fa-download mr-1'></i> Download Resume PDF";
+                        btn.onclick = () => downloadResumePdf(loadId);
+                        fab.appendChild(btn);
+                        contentEl.prepend(fab);
+                    }
+                }
+            } catch(e) {
+                stopThinkingTicker();
+                document.getElementById(loadId).innerHTML = `<div class="p-4 bg-red-50 text-red-500 rounded-2xl text-xs font-bold">Network error: Ensure main.py is running.</div>`;
+            }
+        }
+    </script>
+</body>
+</html>

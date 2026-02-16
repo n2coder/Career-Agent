@@ -1,0 +1,26 @@
+.git
+.gitignore
+.env
+.env.*
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.idea
+.vscode
+*.log
+
+# local runtime/output data
+recruitment_db
+it_recruitment_db
+indian_it_db
+
+# keep knowledge_base for app context
+security_reports
+*.pdf
+*.exe
+large.txt
+big.json

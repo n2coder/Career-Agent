@@ -1,0 +1,114 @@
+﻿name: security-ci
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  python-security-gates:
+    name: Python Security Gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pip-audit
+
+      - name: Syntax check
+        run: python -m py_compile engine.py main.py
+
+      - name: Hallucination guard smoke test
+        run: python scripts/hallucination_guards_smoketest.py
+
+      - name: Production config validator (policy gate)
+        run: |
+          cat > .env.production.ci <<'EOF'
+          API_KEY_REQUIRED=true
+          DISABLE_DOCS=true
+          ALLOW_NULL_ORIGIN=false
+          CORS_ORIGINS=https://career.example.com
+          APP_API_KEY=placeholder-secret
+          TRUST_X_FORWARDED_FOR=false
+          EOF
+          python scripts/validate_production_config.py --env-file .env.production.ci --strict
+
+      - name: Deployment profile validator (prod env policy)
+        run: |
+          cp .env.production.example .env.production.ci
+          python scripts/validate_deployment_profile.py --env-file .env.production.ci
+
+      - name: Export dependency snapshot
+        run: pip freeze > dependency_snapshot.txt
+
+      - name: Dependency vulnerability audit (gate)
+        run: pip-audit -r requirements.txt --desc --progress-spinner off
+
+      - name: Upload security artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-security-artifacts
+          path: |
+            dependency_snapshot.txt
+
+  container-security-gates:
+    name: Container Security Gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t indianjobrag:ci .
+
+      - name: Trivy scan (HIGH,CRITICAL gate)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: indianjobrag:ci
+          format: table
+          vuln-type: 'os,library'
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Trivy SARIF report
+        if: always()
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: indianjobrag:ci
+          format: sarif
+          output: trivy-results.sarif
+          vuln-type: 'os,library'
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
+          exit-code: '0'
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Upload container scan artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-security-artifacts
+          path: trivy-results.sarif

@@ -1,0 +1,28 @@
+# Secrets
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Editors
+.vscode/
+.idea/
+
+# Local data
+recruitment_db/
+it_recruitment_db/
+indian_it_db/
+
+# Reports/artifacts
+security_reports/*.pdf
+
+# Large/binary scratch
+*.exe
+large.txt
+big.json
