@@ -177,4 +177,4 @@ Security and hardening reports are available in:
 
 ## License
 
-Private/internal project unless you add a license file.
+Private.
