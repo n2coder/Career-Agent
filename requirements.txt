@@ -6,3 +6,5 @@ huggingface-hub
 pdfplumber
 python-docx
 requests
+wheel>=0.46.3
+jaraco.context>=6.1.0
