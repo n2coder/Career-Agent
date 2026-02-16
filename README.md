@@ -182,6 +182,10 @@ Security and hardening reports are available in:
 
 ## License
 
-Private.
-cd d:\Projects\IndianJobRAG
+This project is licensed under the **Lin.O Non-Commercial License v1.0**.
+
+- Non-commercial use is allowed.
+- Commercial use requires prior written permission from the copyright holder.
+
+See LICENSE for full terms.
 
