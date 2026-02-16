@@ -1425,7 +1425,9 @@
                 ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
                 : 0;
             updateMobileInputFocus();
-            const keyboardOpen = keyboardInset > 60 || mobileInputFocused;
+            const keyboardByViewport = keyboardInset > 60;
+            const keyboardByFocusFallback = !vv && mobileInputFocused;
+            const keyboardOpen = keyboardByViewport || keyboardByFocusFallback;
             document.body.classList.toggle('keyboard-open', keyboardOpen);
             composer.style.bottom = `calc(${Math.round(keyboardInset)}px + 0.2rem + env(safe-area-inset-bottom))`;
 
