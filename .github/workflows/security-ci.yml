@@ -58,7 +58,31 @@ jobs:
 
       - name: Deployment profile validator (prod env policy)
         run: |
-          cp .env.production.example .env.production.ci
+          cat > .env.production.ci <<'EOF'
+          API_KEY_REQUIRED=true
+          APP_API_KEY=placeholder-secret-1234567890
+          DISABLE_DOCS=true
+          ALLOW_NULL_ORIGIN=false
+          CORS_ORIGINS=https://career.example.com
+          TRUST_X_FORWARDED_FOR=true
+          RATE_LIMIT_WINDOW_SEC=60
+          RATE_LIMIT_QUERY_PER_WINDOW=30
+          RATE_LIMIT_UPLOAD_PER_WINDOW=10
+          MAX_UPLOAD_BYTES=5242880
+          MAX_QUERY_BYTES=20000
+          SESSION_TTL_SEC=3600
+          MAX_SESSIONS=500
+          LLM_PROVIDER=openai
+          OPENAI_MODEL=gpt-4o-mini
+          OPENAI_API_KEY=placeholder-openai-key
+          MONITORING_KEY_REQUIRED=true
+          MONITORING_API_KEY=placeholder-monitoring-secret-1234567890
+          MONITORING_RETENTION_SEC=259200
+          MONITORING_CAPTURE_QUERY_TEXT=false
+          MONITORING_CAPTURE_RESUME_TEXT=false
+          MONITORING_CAPTURE_RESUME_BUILD_TEXT=false
+          MONITORING_CAPTURE_CLIENT_METADATA=false
+          EOF
           python scripts/validate_deployment_profile.py --env-file .env.production.ci
 
       - name: Export dependency snapshot
