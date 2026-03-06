@@ -735,6 +735,7 @@
         const MIN_THINK_MS = 700;
         const TYPE_DELAY_MS = 12;
         const PAGE_CHAR_LIMIT = 2600;
+        let runtimeApiKey = "";
         let activePagination = null;
         let profileReady = false;
         const resumeBuilderStore = {};
@@ -765,7 +766,7 @@
         }
 
         function getApiKey() {
-             return (localStorage.getItem("APP_API_KEY") || "").trim();
+             return String(runtimeApiKey || "").trim();
          }
 
          function getSessionId() {
@@ -785,7 +786,7 @@
              const input = document.getElementById("apiKeyInput");
              const val = (input && input.value ? input.value : "").trim();
              if (!val) return;
-             localStorage.setItem("APP_API_KEY", val);
+             runtimeApiKey = val;
              showApiKeyPanel(false);
              const hint = document.getElementById("api-conn-hint");
              if (hint) hint.classList.add("hidden");
@@ -1488,7 +1489,7 @@
             try {
                 let r = await fetch(`${API_BASE}/status`, { headers: authHeaders() });
                 if (r.status === 401) {
-                    localStorage.removeItem("APP_API_KEY");
+                    runtimeApiKey = "";
                     showApiKeyPanel(true);
                     throw new Error("Unauthorized (missing/incorrect APP_API_KEY)");
                 }

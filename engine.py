@@ -1,14 +1,17 @@
 import os
 import re
+import logging
 from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
 from huggingface_hub import InferenceClient
 
+logger = logging.getLogger("career_agent.engine")
+
 
 class RecruitmentEngine:
-    def __init__(self, kb_chunks=None, client=None):
+    def __init__(self, kb_chunks=None, client=None, kb_token_index=None):
         load_dotenv()
 
         self.api_key = (os.getenv("HUGGINGFACE_API_KEY") or "").strip()
@@ -37,6 +40,9 @@ class RecruitmentEngine:
                 else None
             )
         self.kb_chunks = (kb_chunks if kb_chunks is not None else self._load_knowledge_base())
+        self._kb_token_index = kb_token_index if kb_token_index is not None else [
+            (chunk, self._tokenize(chunk)) for chunk in self.kb_chunks
+        ]
         self.doc_count = len(self.kb_chunks)
         self.is_llm_connected = bool(
             self.openai_api_key if self.llm_provider == "openai" else self.api_key
@@ -145,7 +151,7 @@ class RecruitmentEngine:
     @classmethod
     def from_base(cls, base: "RecruitmentEngine") -> "RecruitmentEngine":
         """Create a per-user/session engine that shares immutable KB/config with base, but not memory/resume state."""
-        return cls(kb_chunks=base.kb_chunks, client=base.client)
+        return cls(kb_chunks=base.kb_chunks, client=base.client, kb_token_index=base._kb_token_index)
 
     def get_status_info(self):
         source = (
@@ -308,8 +314,7 @@ class RecruitmentEngine:
             return self.kb_chunks[:max_chunks]
 
         scored = []
-        for chunk in self.kb_chunks:
-            c_tokens = self._tokenize(chunk)
+        for chunk, c_tokens in self._kb_token_index:
             overlap = len(q_tokens.intersection(c_tokens))
             if overlap == 0:
                 continue
@@ -318,6 +323,19 @@ class RecruitmentEngine:
         scored.sort(key=lambda x: x[0], reverse=True)
         selected = [chunk for _, chunk in scored[:max_chunks]]
         return selected or self.kb_chunks[:max_chunks]
+
+    def _is_llm_error(self, text: str) -> bool:
+        return isinstance(text, str) and text.startswith("LLM Error:")
+
+    def _public_llm_error_message(self, raw_error: str) -> str:
+        raw = (raw_error or "").lower()
+        if any(tok in raw for tok in ["missing_provider_key", "auth_failed", "incorrect api key", "unauthorized"]):
+            return "LLM service is not configured correctly. Please contact support."
+        if any(tok in raw for tok in ["model_not_supported", "hf_model_not_supported"]):
+            return "Configured model is unavailable right now. Please try again later."
+        if "timeout" in raw:
+            return "LLM request timed out. Please try again."
+        return "LLM service is temporarily unavailable. Please try again shortly."
 
     def _extract_content(self, completion):
         content = completion.choices[0].message.content
@@ -985,7 +1003,7 @@ class RecruitmentEngine:
 
     def _query_hf(self, system_text, user_text, max_tokens=None, max_continuations=None, style_contract=None):
         if not self.api_key:
-            return "LLM Error: Missing HUGGINGFACE_API_KEY in .env"
+            return "LLM Error: missing_provider_key"
 
         max_tokens = max_tokens or self.max_tokens
         max_continuations = max_continuations if max_continuations is not None else self.max_continuations
@@ -1049,11 +1067,22 @@ class RecruitmentEngine:
             self.last_response_source = f"HuggingFace/{self.model_name}"
             return cleaned or "No response generated."
         except Exception as exc:
-            return f"LLM Error: {str(exc)}"
+            msg = str(exc or "")
+            low = msg.lower()
+            logger.warning("hf_request_failed detail=%s", msg[:600])
+            if "model_not_supported" in low or "not supported by any provider" in low:
+                return "LLM Error: hf_model_not_supported"
+            if "invalid_request_error" in low or "bad request" in low:
+                return "LLM Error: invalid_request"
+            if "timeout" in low:
+                return "LLM Error: timeout"
+            if "unauthorized" in low or "forbidden" in low:
+                return "LLM Error: auth_failed"
+            return "LLM Error: upstream_unavailable"
 
     def _query_openai(self, system_text, user_text, max_tokens=None, max_continuations=None, style_contract=None):
         if not self.openai_api_key:
-            return "LLM Error: Missing OPENAI_API_KEY in .env"
+            return "LLM Error: missing_provider_key"
 
         max_tokens = max_tokens or self.max_tokens
         max_continuations = max_continuations if max_continuations is not None else self.max_continuations
@@ -1089,7 +1118,16 @@ class RecruitmentEngine:
             response = requests.post(url, headers=headers, json=payload, timeout=self.timeout_seconds)
             data = response.json()
             if response.status_code >= 400:
-                return f"LLM Error: {data.get('error', {}).get('message', f'HTTP {response.status_code}') }"
+                err_msg = (data.get("error", {}) or {}).get("message", f"HTTP {response.status_code}")
+                low = str(err_msg).lower()
+                logger.warning("openai_request_failed status=%s detail=%s", response.status_code, str(err_msg)[:600])
+                if "incorrect api key" in low or "unauthorized" in low:
+                    return "LLM Error: auth_failed"
+                if "model" in low and "not" in low and "support" in low:
+                    return "LLM Error: model_not_supported"
+                if "timeout" in low:
+                    return "LLM Error: timeout"
+                return "LLM Error: upstream_http_error"
 
             choices = data.get("choices", [])
             if not choices:
@@ -1137,7 +1175,12 @@ class RecruitmentEngine:
             self.last_response_source = f"OpenAI/{self.openai_model}"
             return cleaned or "No response generated."
         except Exception as exc:
-            return f"LLM Error: {str(exc)}"
+            msg = str(exc or "")
+            low = msg.lower()
+            logger.warning("openai_exception detail=%s", msg[:600])
+            if "timeout" in low:
+                return "LLM Error: timeout"
+            return "LLM Error: upstream_unavailable"
 
     def _query_llm(self, system_text, user_text, max_tokens=None, max_continuations=None, style_contract=None):
         if self.llm_provider == "openai":
@@ -1163,10 +1206,15 @@ class RecruitmentEngine:
                 marker in low
                 for marker in [
                     "model_not_supported",
+                    "hf_model_not_supported",
                     "not supported by any provider",
                     "invalid_request_error",
+                    "invalid_request",
                     "bad request",
                     "provider",
+                    "missing_provider_key",
+                    "auth_failed",
+                    "upstream_unavailable",
                 ]
             )
             if hf_unavailable:
@@ -1233,6 +1281,12 @@ class RecruitmentEngine:
             max_continuations=self.max_continuations,
             style_contract=self.resume_style_contract,
         )
+        if self._is_llm_error(resume_md):
+            return {
+                "answer": self._public_llm_error_message(resume_md),
+                "sources": [self._source_label(), "ResumeBuilder"],
+                "selected_model": self.llm_provider,
+            }
         resume_md = self._strip_disallowed_disclaimers(resume_md)
         resume_md = self._normalize_for_resume(resume_md)
 
@@ -1411,6 +1465,13 @@ class RecruitmentEngine:
             max_tokens=max_tokens,
             max_continuations=max_continuations,
         )
+        if self._is_llm_error(answer):
+            return {
+                "answer": self._public_llm_error_message(answer),
+                "sources": [self._source_label(), "LocalKnowledgeBase"],
+                "comparison": None,
+                "selected_model": self.llm_provider,
+            }
 
         if self._looks_like_prompt_leak(answer):
             answer = "I can't share internal system instructions. Ask your career question and I'll answer directly."

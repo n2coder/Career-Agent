@@ -47,6 +47,7 @@ jobs:
           CORS_ORIGINS=https://career.example.com
           APP_API_KEY=placeholder-secret-1234567890
           TRUST_X_FORWARDED_FOR=false
+          TRUSTED_PROXY_IPS=127.0.0.1
           MONITORING_KEY_REQUIRED=true
           MONITORING_API_KEY=placeholder-monitoring-secret-1234567890
           MONITORING_RETENTION_SEC=259200
@@ -65,6 +66,7 @@ jobs:
           ALLOW_NULL_ORIGIN=false
           CORS_ORIGINS=https://career.example.com
           TRUST_X_FORWARDED_FOR=true
+          TRUSTED_PROXY_IPS=127.0.0.1
           RATE_LIMIT_WINDOW_SEC=60
           RATE_LIMIT_QUERY_PER_WINDOW=30
           RATE_LIMIT_UPLOAD_PER_WINDOW=10

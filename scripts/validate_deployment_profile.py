@@ -31,6 +31,8 @@ def validate(env: dict) -> list[str]:
         errors.append("ALLOW_NULL_ORIGIN must be false in production.")
     if not truthy(env.get("TRUST_X_FORWARDED_FOR", "")):
         errors.append("TRUST_X_FORWARDED_FOR should be true behind reverse proxy.")
+    elif not env.get("TRUSTED_PROXY_IPS", "").strip():
+        errors.append("TRUSTED_PROXY_IPS must be set when TRUST_X_FORWARDED_FOR=true.")
 
     cors = env.get("CORS_ORIGINS", "")
     origins = [x.strip() for x in cors.split(",") if x.strip()]

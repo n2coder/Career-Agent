@@ -72,8 +72,8 @@ def validate(env: dict, strict: bool = False) -> list[str]:
         except ValueError:
             errors.append("MONITORING_RETENTION_SEC must be an integer.")
 
-    if strict and truthy(env.get("TRUST_X_FORWARDED_FOR", "false")):
-        errors.append("TRUST_X_FORWARDED_FOR should be false unless behind trusted proxy.")
+    if truthy(env.get("TRUST_X_FORWARDED_FOR", "false")) and not env.get("TRUSTED_PROXY_IPS", "").strip():
+        errors.append("TRUSTED_PROXY_IPS must be set when TRUST_X_FORWARDED_FOR=true.")
 
     return errors
 

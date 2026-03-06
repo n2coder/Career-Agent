@@ -15,6 +15,7 @@ from collections import defaultdict, deque
 import pdfplumber
 from docx import Document
 from fastapi import FastAPI, File, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, FileResponse
@@ -43,11 +44,10 @@ else:
         "http://127.0.0.1:8001",
         "http://localhost:5500",
         "http://127.0.0.1:5500",
-        "null",  # allows opening index.html via file:// (Origin: null) during local dev
     ]
 
 # Allow file:// origin during local dev only when enabled.
-ALLOW_NULL_ORIGIN = (os.getenv("ALLOW_NULL_ORIGIN", "true").strip().lower() in {"1", "true", "yes"})
+ALLOW_NULL_ORIGIN = (os.getenv("ALLOW_NULL_ORIGIN", "false").strip().lower() in {"1", "true", "yes"})
 if ALLOW_NULL_ORIGIN and "null" not in ALLOW_ORIGINS:
     ALLOW_ORIGINS.append("null")
 
@@ -85,6 +85,8 @@ RATE_LIMIT_WINDOW_SEC = int(os.getenv("RATE_LIMIT_WINDOW_SEC", "60"))
 RATE_LIMIT_QUERY_PER_WINDOW = int(os.getenv("RATE_LIMIT_QUERY_PER_WINDOW", "30"))
 RATE_LIMIT_UPLOAD_PER_WINDOW = int(os.getenv("RATE_LIMIT_UPLOAD_PER_WINDOW", "10"))
 TRUST_X_FORWARDED_FOR = (os.getenv("TRUST_X_FORWARDED_FOR", "false").strip().lower() in {"1", "true", "yes"})
+TRUSTED_PROXY_IPS_RAW = os.getenv("TRUSTED_PROXY_IPS", "").strip()
+TRUSTED_PROXY_IPS = [x.strip() for x in TRUSTED_PROXY_IPS_RAW.split(",") if x.strip()]
 
 SESSION_TTL_SEC = int(os.getenv("SESSION_TTL_SEC", "3600"))
 MAX_SESSIONS = int(os.getenv("MAX_SESSIONS", "500"))
@@ -101,12 +103,48 @@ _monitor_visitors = {}
 _monitor_query_events = deque(maxlen=MONITORING_MAX_QUERY_EVENTS)
 _monitor_resume_upload_events = deque(maxlen=MONITORING_MAX_RESUME_UPLOADS)
 _monitor_resume_build_events = deque(maxlen=MONITORING_MAX_RESUME_BUILDS)
+_rate_last_cleanup = 0.0
 
 app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
 
 
+def _is_ip_in_allowlist(ip_text: str, allowlist=None) -> bool:
+    allow_tokens = MONITORING_ALLOWED_IPS if allowlist is None else [x.strip() for x in (allowlist or []) if x.strip()]
+    if not allow_tokens:
+        return True
+    ip_text = (ip_text or "").strip()
+    if not ip_text:
+        return False
+    try:
+        ip_obj = ipaddress.ip_address(ip_text)
+    except ValueError:
+        return False
+    for token in allow_tokens:
+        if token == "*":
+            return True
+        try:
+            if "/" in token:
+                if ip_obj in ipaddress.ip_network(token, strict=False):
+                    return True
+            elif ip_obj == ipaddress.ip_address(token):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _is_trusted_proxy_source(request: Request) -> bool:
+    if not TRUST_X_FORWARDED_FOR:
+        return False
+    # Only trust X-Forwarded-For when the direct peer is explicitly allowlisted.
+    if not TRUSTED_PROXY_IPS:
+        return False
+    remote_ip = request.client.host if request.client else ""
+    return _is_ip_in_allowlist(remote_ip, TRUSTED_PROXY_IPS)
+
+
 def _client_ip(request: Request):
-    if TRUST_X_FORWARDED_FOR:
+    if _is_trusted_proxy_source(request):
         xff = request.headers.get("x-forwarded-for", "")
         if xff:
             return xff.split(",")[0].strip()
@@ -114,6 +152,7 @@ def _client_ip(request: Request):
 
 
 def _check_rate_limit(bucket_key: str, limit: int):
+    global _rate_last_cleanup
     now = time.time()
     q = _rate_buckets[bucket_key]
     while q and (now - q[0]) > RATE_LIMIT_WINDOW_SEC:
@@ -121,6 +160,14 @@ def _check_rate_limit(bucket_key: str, limit: int):
     if len(q) >= limit:
         return False
     q.append(now)
+    # Periodically prune stale keys so high-cardinality traffic cannot grow the map forever.
+    if (now - _rate_last_cleanup) > max(10, RATE_LIMIT_WINDOW_SEC):
+        for k, bucket in list(_rate_buckets.items()):
+            while bucket and (now - bucket[0]) > RATE_LIMIT_WINDOW_SEC:
+                bucket.popleft()
+            if not bucket:
+                _rate_buckets.pop(k, None)
+        _rate_last_cleanup = now
     return True
 
 
@@ -209,36 +256,7 @@ def _safe_capture(value: str, enabled: bool, max_len: int = MONITORING_MAX_CAPTU
     return _truncate_value(value, max_len=max_len)
 
 
-def _is_ip_in_allowlist(ip_text: str) -> bool:
-    if not MONITORING_ALLOWED_IPS:
-        return True
-    ip_text = (ip_text or "").strip()
-    if not ip_text:
-        return False
-    try:
-        ip_obj = ipaddress.ip_address(ip_text)
-    except ValueError:
-        return False
-    for token in MONITORING_ALLOWED_IPS:
-        if token == "*":
-            return True
-        try:
-            if "/" in token:
-                if ip_obj in ipaddress.ip_network(token, strict=False):
-                    return True
-            elif ip_obj == ipaddress.ip_address(token):
-                return True
-        except ValueError:
-            continue
-    return False
-
-
 def _is_monitor_ip_allowed(request: Request) -> bool:
-    # Prefer x-forwarded-for when present to support reverse-proxy deployments.
-    xff = (request.headers.get("x-forwarded-for") or "").strip()
-    if xff:
-        src = xff.split(",")[0].strip()
-        return _is_ip_in_allowlist(src)
     return _is_ip_in_allowlist(_client_ip(request))
 
 
@@ -399,6 +417,8 @@ async def add_request_context(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
     logger.info(
         "request request_id=%s method=%s path=%s status=%s duration_ms=%s ip=%s",
         request_id,
@@ -416,7 +436,9 @@ async def get_status(request: Request):
     auth_err = _require_api_key(request)
     if auth_err:
         return auth_err
-    return _base_engine.get_status_info()
+    payload = _base_engine.get_status_info()
+    payload["api_key_required"] = API_KEY_REQUIRED
+    return payload
 
 
 @app.get("/health")
@@ -605,9 +627,9 @@ async def resume_upload(request: Request, file: UploadFile = File(...)):
         if not content:
             return JSONResponse(status_code=400, content={"ok": False, "message": "Uploaded file is empty."})
 
-        text = _extract_resume_text(file, content)
+        text = await run_in_threadpool(_extract_resume_text, file, content)
         engine = _engine_for_request(request)
-        profile = engine.set_resume_profile(text, file.filename)
+        profile = await run_in_threadpool(engine.set_resume_profile, text, file.filename)
 
         if not profile.get("uploaded"):
             return JSONResponse(status_code=400, content={"ok": False, "message": profile.get("message", "Failed to parse resume.")})
@@ -658,10 +680,11 @@ async def query_endpoint(request: Request):
         _record_query_event(request, user_query, use_profile_context=use_profile_context, resume_builder=resume_builder)
 
         engine = _engine_for_request(request)
-        result = engine.get_ai_response(
+        result = await run_in_threadpool(
+            engine.get_ai_response,
             user_query,
-            use_profile_context=use_profile_context,
-            resume_builder=resume_builder,
+            use_profile_context,
+            resume_builder,
         )
         if resume_builder and isinstance(result, dict):
             rb = result.get("resume_builder") or {}
