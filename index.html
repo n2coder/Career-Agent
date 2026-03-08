@@ -799,32 +799,143 @@
              return key ? { ...headers, "X-API-Key": key } : headers;
          }
 
+         function renderAssistantMarkdown(container, markdownText) {
+            if (!container) return;
+            const html = DOMPurify.sanitize(marked.parse(String(markdownText || "")));
+            container.innerHTML = html;
+            container.querySelectorAll("a[href]").forEach((a) => {
+                const href = (a.getAttribute("href") || "").trim();
+                if (/^https?:\/\//i.test(href)) {
+                    a.setAttribute("target", "_blank");
+                    a.setAttribute("rel", "noopener noreferrer");
+                }
+            });
+         }
+
          async function typeMarkdown(container, markdownText) {
             const fullText = String(markdownText || "");
             const step = Math.max(3, Math.floor(fullText.length / 260));
             let i = 0;
             const historyEl = document.getElementById("chat-history");
 
-            const makeLinksOpenInNewTab = (root) => {
-                if (!root) return;
-                root.querySelectorAll("a[href]").forEach((a) => {
-                    const href = (a.getAttribute("href") || "").trim();
-                    if (/^https?:\/\//i.test(href)) {
-                        a.setAttribute("target", "_blank");
-                        a.setAttribute("rel", "noopener noreferrer");
-                    }
-                });
-            };
-
             while (i < fullText.length) {
                 i = Math.min(i + step, fullText.length);
                 const partial = fullText.slice(0, i);
-                container.innerHTML = DOMPurify.sanitize(marked.parse(partial));
-                makeLinksOpenInNewTab(container);
+                renderAssistantMarkdown(container, partial);
                 if (historyEl) {
                     historyEl.scrollTop = historyEl.scrollHeight;
                 }
                 await sleep(TYPE_DELAY_MS);
+            }
+        }
+
+        function createSentenceTyper(container) {
+            let typedText = "";
+            let pending = "";
+            const queue = [];
+            let finished = false;
+            let running = false;
+
+            const splitReadySentences = () => {
+                while (true) {
+                    const m = pending.match(/^([\s\S]*?[.!?](?:\s+|$))/);
+                    if (!m) break;
+                    const sentence = m[1];
+                    queue.push(sentence);
+                    pending = pending.slice(sentence.length);
+                }
+                // Fallback for very long punctuation-less streams.
+                if (pending.length > 120) {
+                    queue.push(pending.slice(0, 90));
+                    pending = pending.slice(90);
+                }
+            };
+
+            const tick = async () => {
+                if (running) return;
+                running = true;
+                const historyEl = document.getElementById("chat-history");
+                while (!finished || queue.length || pending.length) {
+                    splitReadySentences();
+                    if (!queue.length) {
+                        await sleep(16);
+                        continue;
+                    }
+                    const backlogChars = queue.reduce((acc, s) => acc + s.length, 0) + pending.length;
+                    const delay =
+                        backlogChars > 1200 ? 3 :
+                        backlogChars > 700 ? 5 :
+                        backlogChars > 320 ? 7 : 10;
+                    const charsPerTick =
+                        backlogChars > 1200 ? 8 :
+                        backlogChars > 700 ? 6 :
+                        backlogChars > 320 ? 4 : 2;
+                    let front = queue[0];
+                    const take = Math.min(charsPerTick, front.length);
+                    typedText += front.slice(0, take);
+                    front = front.slice(take);
+                    if (!front) queue.shift();
+                    else queue[0] = front;
+                    renderAssistantMarkdown(container, typedText);
+                    if (historyEl) historyEl.scrollTop = historyEl.scrollHeight;
+                    await sleep(delay);
+                }
+                if (pending.trim()) {
+                    typedText += pending;
+                    pending = "";
+                    renderAssistantMarkdown(container, typedText);
+                }
+                running = false;
+            };
+
+            return {
+                enqueue(text) {
+                    if (!text) return;
+                    const clean = String(text).replace(/<<END_OF_RESPONSE>>/g, "");
+                    pending += clean;
+                    tick();
+                },
+                finish() {
+                    finished = true;
+                    tick();
+                },
+                getText() {
+                    return String(typedText + pending);
+                }
+            };
+        }
+
+        async function streamQuery(payload, onEvent) {
+            const response = await fetch(`${API_BASE}/query/stream`, {
+                method: "POST",
+                headers: authHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify(payload),
+            });
+            if (!response.ok || !response.body) {
+                const txt = await response.text();
+                throw new Error(`HTTP ${response.status}: ${txt}`);
+            }
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = "";
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buf += decoder.decode(value, { stream: true });
+                let idx = -1;
+                while ((idx = buf.indexOf("\n")) >= 0) {
+                    const line = buf.slice(0, idx).trim();
+                    buf = buf.slice(idx + 1);
+                    if (!line) continue;
+                    let event = null;
+                    try {
+                        event = JSON.parse(line);
+                    } catch (_err) {
+                        // ignore malformed partial lines
+                        continue;
+                    }
+                    onEvent(event);
+                }
             }
         }
 
@@ -1570,34 +1681,62 @@
             const thinkingEl = document.getElementById(`${loadId}-thinking`);
             startThinkingTicker(thinkingEl, inferThinkingSteps(q, { useProfileContext }));
             try {
-                const apiCall = fetch(`${API_BASE}/query`, {
-                    method: 'POST',
-                    headers: authHeaders({'Content-Type': 'application/json'}),
-                    body: JSON.stringify({
+                let data = null;
+                let receivedChunk = false;
+                let contentEl = null;
+                let typer = null;
+                const ensureAssistantBubble = () => {
+                    if (contentEl) return contentEl;
+                    const loaderEl = document.getElementById(loadId);
+                    if (loaderEl) loaderEl.classList.remove("animate-pulse");
+                    stopThinkingTicker();
+                    document.getElementById(loadId).innerHTML = `
+                        <div class="avatar-box scale-90 shrink-0 shadow-sm"><div class="eyes"><div class="eye"></div><div class="eye"></div></div><div class="nose"></div></div>
+                        <div class="assistant-bubble ai-response p-6 rounded-3xl rounded-tl-none max-w-[95%] text-sm leading-relaxed text-slate-700" id="${loadId}-content"></div>`;
+                    contentEl = document.getElementById(`${loadId}-content`);
+                    typer = createSentenceTyper(contentEl);
+                    nudgeToReadablePosition(history);
+                    return contentEl;
+                };
+
+                await streamQuery(
+                    {
                         query: q,
                         use_profile_context: useProfileContext,
                         resume_builder: resumeBuilder
-                    })
-                });
+                    },
+                    (event) => {
+                        if (!event || typeof event !== "object") return;
+                        if (event.type === "chunk") {
+                            const text = String(event.text || "");
+                            if (!text) return;
+                            ensureAssistantBubble();
+                            receivedChunk = true;
+                            typer.enqueue(text);
+                            return;
+                        }
+                        if (event.type === "done") {
+                            data = event.result || {};
+                            const finalText = String(data.answer || "").trim();
+                            ensureAssistantBubble();
+                            if (!receivedChunk && finalText) {
+                                typer.enqueue(finalText);
+                            }
+                            typer.finish();
+                            return;
+                        }
+                        if (event.type === "error") {
+                            throw new Error(String(event.message || "Request processing failed."));
+                        }
+                    }
+                );
 
-                const [response] = await Promise.all([apiCall, sleep(MIN_THINK_MS)]); 
-                const data = await response.json();
-                const loaderEl = document.getElementById(loadId);
-                if (loaderEl) loaderEl.classList.remove("animate-pulse");
-                stopThinkingTicker();
-                
-                document.getElementById(loadId).innerHTML = `
-                    <div class="avatar-box scale-90 shrink-0 shadow-sm"><div class="eyes"><div class="eye"></div><div class="eye"></div></div><div class="nose"></div></div>
-                    <div class="assistant-bubble ai-response p-6 rounded-3xl rounded-tl-none max-w-[95%] text-sm leading-relaxed text-slate-700" id="${loadId}-content"></div>`;
-                const contentEl = document.getElementById(`${loadId}-content`);
-                nudgeToReadablePosition(history);
-
-                const responseText = String(data.answer || "").trim();
+                const responseText = String((data && data.answer) || (typer ? typer.getText() : "") || "").trim();
                 if (!responseText) {
+                    ensureAssistantBubble();
                     contentEl.textContent = "No response generated.";
                     return;
                 }
-                await typeMarkdown(contentEl, responseText);
                 nudgeToReadablePosition(history);
                 if (isMobileViewport()) {
                     mobileInputFocused = true;
@@ -1607,7 +1746,7 @@
                     }, 0);
                 }
 
-                if (data.resume_builder && data.resume_builder.content_markdown) {
+                if (data && data.resume_builder && data.resume_builder.content_markdown) {
                     resumeBuilderStore[loadId] = {
                         name: data.resume_builder.name || "resume",
                         content: data.resume_builder.content_markdown

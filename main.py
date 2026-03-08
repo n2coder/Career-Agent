@@ -18,7 +18,7 @@ from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from engine import RecruitmentEngine
@@ -254,6 +254,10 @@ def _safe_capture(value: str, enabled: bool, max_len: int = MONITORING_MAX_CAPTU
     if not enabled:
         return ""
     return _truncate_value(value, max_len=max_len)
+
+
+def _ndjson_line(obj: dict) -> bytes:
+    return (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
 
 
 def _is_monitor_ip_allowed(request: Request) -> bool:
@@ -706,6 +710,96 @@ async def query_endpoint(request: Request):
             status_code=500,
             content={"answer": "Request processing failed.", "sources": [], "request_id": req_id},
         )
+
+
+@app.post("/query/stream")
+async def query_stream_endpoint(request: Request):
+    try:
+        auth_err = _require_api_key(request)
+        if auth_err:
+            return auth_err
+        ip = _client_ip(request)
+        if not _check_rate_limit(f"query:{ip}", RATE_LIMIT_QUERY_PER_WINDOW):
+            return JSONResponse(status_code=429, content={"error": "Rate limit exceeded. Try again shortly."})
+
+        raw = await request.body()
+        if len(raw) > MAX_QUERY_BYTES:
+            return JSONResponse(status_code=413, content={"error": "Query payload too large."})
+        data = json.loads(raw.decode("utf-8", errors="strict"))
+
+        user_query = data.get("query", "")
+        if user_query is None:
+            user_query = ""
+        if not isinstance(user_query, str):
+            return JSONResponse(status_code=400, content={"error": "Invalid query type."})
+
+        use_profile_context = bool(data.get("use_profile_context", False))
+        resume_builder = bool(data.get("resume_builder", False))
+        _record_query_event(request, user_query, use_profile_context=use_profile_context, resume_builder=resume_builder)
+        engine = _engine_for_request(request)
+        req_id = getattr(request.state, "request_id", "-")
+
+        def stream_iter():
+            done_sent = False
+            try:
+                for event in engine.get_ai_response_stream(
+                    user_query,
+                    use_profile_context=use_profile_context,
+                    resume_builder=resume_builder,
+                ):
+                    if isinstance(event, str):
+                        if event:
+                            yield _ndjson_line({"type": "chunk", "text": event})
+                        continue
+                    if not isinstance(event, dict):
+                        continue
+                    et = event.get("type")
+                    if et == "chunk":
+                        text_piece = str(event.get("text") or "")
+                        if text_piece:
+                            yield _ndjson_line({"type": "chunk", "text": text_piece})
+                        continue
+                    if et == "done":
+                        result = event.get("result") or {}
+                        if resume_builder and isinstance(result, dict):
+                            rb = result.get("resume_builder") or {}
+                            resume_md = rb.get("content_markdown") or ""
+                            if resume_md:
+                                _record_resume_build_event(
+                                    request=request,
+                                    resume_name=rb.get("name", ""),
+                                    content_markdown=resume_md,
+                                    query_text=user_query,
+                                )
+                        yield _ndjson_line({"type": "done", "result": jsonable_encoder(result)})
+                        done_sent = True
+                        break
+                    if et == "error":
+                        yield _ndjson_line({"type": "error", "message": str(event.get("message") or "Request processing failed.")})
+                        done_sent = True
+                        break
+                if not done_sent:
+                    yield _ndjson_line(
+                        {
+                            "type": "done",
+                            "result": {
+                                "answer": "No response generated.",
+                                "sources": [],
+                                "comparison": None,
+                            },
+                        }
+                    )
+            except Exception:
+                logger.exception("query_stream_endpoint_failed request_id=%s", req_id)
+                yield _ndjson_line({"type": "error", "message": "Request processing failed.", "request_id": req_id})
+
+        return StreamingResponse(stream_iter(), media_type="application/x-ndjson")
+    except ValueError:
+        return JSONResponse(status_code=400, content={"error": "Invalid JSON payload."})
+    except Exception:
+        req_id = getattr(request.state, "request_id", "-")
+        logger.exception("query_stream_bootstrap_failed request_id=%s", req_id)
+        return JSONResponse(status_code=500, content={"error": "Request processing failed.", "request_id": req_id})
 
 
 if __name__ == "__main__":
