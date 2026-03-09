@@ -802,7 +802,9 @@
          function renderAssistantMarkdown(container, markdownText) {
             if (!container) return;
             const html = DOMPurify.sanitize(marked.parse(String(markdownText || "")));
+            const stickyResumeFab = container.querySelector(".resume-download-fab");
             container.innerHTML = html;
+            if (stickyResumeFab) container.prepend(stickyResumeFab);
             container.querySelectorAll("a[href]").forEach((a) => {
                 const href = (a.getAttribute("href") || "").trim();
                 if (/^https?:\/\//i.test(href)) {
@@ -819,22 +821,29 @@
             const historyEl = document.getElementById("chat-history");
             let autoFollow = true;
             let userScrollIntent = false;
+            let programmaticScroll = false;
             const onUserScrollIntent = () => {
                 userScrollIntent = true;
                 autoFollow = false;
             };
             const onHistoryScroll = () => {
                 if (!historyEl) return;
-                const distanceFromBottom = historyEl.scrollHeight - historyEl.scrollTop - historyEl.clientHeight;
-                if (userScrollIntent || distanceFromBottom > 36) {
-                    autoFollow = false;
-                }
+                if (programmaticScroll) return;
+                autoFollow = false;
+            };
+            const scrollToBottomIfAllowed = () => {
+                if (!historyEl || !autoFollow) return;
+                programmaticScroll = true;
+                historyEl.scrollTop = historyEl.scrollHeight;
+                requestAnimationFrame(() => { programmaticScroll = false; });
             };
             if (historyEl) {
                 historyEl.addEventListener("scroll", onHistoryScroll, { passive: true });
                 historyEl.addEventListener("wheel", onUserScrollIntent, { passive: true });
                 historyEl.addEventListener("touchmove", onUserScrollIntent, { passive: true });
                 historyEl.addEventListener("pointerdown", onUserScrollIntent, { passive: true });
+                historyEl.addEventListener("mousedown", onUserScrollIntent, { passive: true });
+                historyEl.addEventListener("touchstart", onUserScrollIntent, { passive: true });
             }
 
             try {
@@ -842,9 +851,7 @@
                     i = Math.min(i + step, fullText.length);
                     const partial = fullText.slice(0, i);
                     renderAssistantMarkdown(container, partial);
-                    if (historyEl && autoFollow) {
-                        historyEl.scrollTop = historyEl.scrollHeight;
-                    }
+                    scrollToBottomIfAllowed();
                     await sleep(TYPE_DELAY_MS);
                 }
             } finally {
@@ -853,6 +860,8 @@
                     historyEl.removeEventListener("wheel", onUserScrollIntent);
                     historyEl.removeEventListener("touchmove", onUserScrollIntent);
                     historyEl.removeEventListener("pointerdown", onUserScrollIntent);
+                    historyEl.removeEventListener("mousedown", onUserScrollIntent);
+                    historyEl.removeEventListener("touchstart", onUserScrollIntent);
                 }
             }
         }
@@ -865,6 +874,7 @@
             let running = false;
             let autoFollow = true;
             let userScrollIntent = false;
+            let programmaticScroll = false;
             const historyEl = document.getElementById("chat-history");
             const onUserScrollIntent = () => {
                 userScrollIntent = true;
@@ -872,16 +882,22 @@
             };
             const onHistoryScroll = () => {
                 if (!historyEl || finished) return;
-                const distanceFromBottom = historyEl.scrollHeight - historyEl.scrollTop - historyEl.clientHeight;
-                if (userScrollIntent || distanceFromBottom > 36) {
-                    autoFollow = false;
-                }
+                if (programmaticScroll) return;
+                autoFollow = false;
+            };
+            const scrollToBottomIfAllowed = () => {
+                if (!historyEl || !autoFollow) return;
+                programmaticScroll = true;
+                historyEl.scrollTop = historyEl.scrollHeight;
+                requestAnimationFrame(() => { programmaticScroll = false; });
             };
             if (historyEl) {
                 historyEl.addEventListener("scroll", onHistoryScroll, { passive: true });
                 historyEl.addEventListener("wheel", onUserScrollIntent, { passive: true });
                 historyEl.addEventListener("touchmove", onUserScrollIntent, { passive: true });
                 historyEl.addEventListener("pointerdown", onUserScrollIntent, { passive: true });
+                historyEl.addEventListener("mousedown", onUserScrollIntent, { passive: true });
+                historyEl.addEventListener("touchstart", onUserScrollIntent, { passive: true });
             }
 
             const splitReadySentences = () => {
@@ -924,9 +940,7 @@
                     if (!front) queue.shift();
                     else queue[0] = front;
                     renderAssistantMarkdown(container, typedText);
-                    if (historyEl && autoFollow) {
-                        historyEl.scrollTop = historyEl.scrollHeight;
-                    }
+                    scrollToBottomIfAllowed();
                     await sleep(delay);
                 }
                 if (pending.trim()) {
@@ -939,6 +953,8 @@
                     historyEl.removeEventListener("wheel", onUserScrollIntent);
                     historyEl.removeEventListener("touchmove", onUserScrollIntent);
                     historyEl.removeEventListener("pointerdown", onUserScrollIntent);
+                    historyEl.removeEventListener("mousedown", onUserScrollIntent);
+                    historyEl.removeEventListener("touchstart", onUserScrollIntent);
                 }
                 running = false;
             };
@@ -1386,6 +1402,22 @@
             return "";
         }
 
+        function attachResumeDownloadFab(contentEl, loadId, name, markdown) {
+            if (!contentEl || !loadId || !markdown) return;
+            resumeBuilderStore[loadId] = {
+                name: name || "resume",
+                content: markdown
+            };
+            if (contentEl.querySelector(".resume-download-fab")) return;
+            const fab = document.createElement("div");
+            fab.className = "resume-download-fab";
+            const btn = document.createElement("button");
+            btn.innerHTML = "<i class='fa-solid fa-download mr-1'></i> Download Resume PDF";
+            btn.onclick = () => downloadResumePdf(loadId);
+            fab.appendChild(btn);
+            contentEl.prepend(fab);
+        }
+
         function cleanMdInline(text) {
             return (text || "")
                 .replace(/\*\*(.*?)\*\*/g, "$1")
@@ -1812,32 +1844,25 @@
                 }
 
                 if (data && data.resume_builder && data.resume_builder.content_markdown) {
-                    resumeBuilderStore[loadId] = {
-                        name: data.resume_builder.name || "resume",
-                        content: data.resume_builder.content_markdown
-                    };
-                    const fab = document.createElement("div");
-                    fab.className = "resume-download-fab";
-                    const btn = document.createElement("button");
-                    btn.innerHTML = "<i class='fa-solid fa-download mr-1'></i> Download Resume PDF";
-                    btn.onclick = () => downloadResumePdf(loadId);
-                    fab.appendChild(btn);
-                    contentEl.prepend(fab);
+                    attachResumeDownloadFab(
+                        contentEl,
+                        loadId,
+                        data.resume_builder.name || "resume",
+                        data.resume_builder.content_markdown
+                    );
+                } else if (resumeBuilder) {
+                    const draftMd = extractResumeDraftMarkdown(responseText);
+                    if (draftMd) {
+                        attachResumeDownloadFab(contentEl, loadId, "resume", draftMd);
+                    }
                 } else if (fresherFlow) {
                     const draftMd = fresherResumeOnly ? responseText : extractResumeDraftMarkdown(responseText);
                     if (draftMd) {
-                        resumeBuilderStore[loadId] = {
-                            name: fresherName || "fresher_resume",
-                            content: draftMd
-                        };
-                        const fab = document.createElement("div");
-                        fab.className = "resume-download-fab";
-                        const btn = document.createElement("button");
-                        btn.innerHTML = "<i class='fa-solid fa-download mr-1'></i> Download Resume PDF";
-                        btn.onclick = () => downloadResumePdf(loadId);
-                        fab.appendChild(btn);
-                        contentEl.prepend(fab);
+                        attachResumeDownloadFab(contentEl, loadId, fresherName || "fresher_resume", draftMd);
                     }
+                } else if (detectResumeIntent(q)) {
+                    const draftMd = extractResumeDraftMarkdown(responseText);
+                    if (draftMd) attachResumeDownloadFab(contentEl, loadId, "resume", draftMd);
                 }
             } catch(e) {
                 stopThinkingTicker();

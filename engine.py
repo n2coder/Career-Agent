@@ -1791,7 +1791,13 @@ class RecruitmentEngine:
                 "sources": ["General Chat"],
             }
 
-        if resume_builder and self.resume_uploaded:
+        if resume_builder:
+            if not self.resume_uploaded:
+                return {
+                    "answer": "Resume Builder needs an uploaded resume profile. Please upload your resume first, then click **Resume Builder**.",
+                    "sources": ["ResumeProfile"],
+                    "selected_model": self.llm_provider,
+                }
             return self._build_resume_output(user_query)
 
         return self.ask(
