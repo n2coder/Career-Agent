@@ -9,6 +9,8 @@ import uuid
 import hashlib
 import threading
 import ipaddress
+import subprocess
+import tempfile
 from pathlib import Path
 from collections import defaultdict, deque
 
@@ -386,17 +388,68 @@ def _extract_resume_text(file: UploadFile, content: bytes):
                 page_text = (page.extract_text() or "").strip()
                 if page_text:
                     pages_text.append(page_text)
+                # Preserve table structure so role/company/date rows are not lost.
+                try:
+                    tables = page.extract_tables() or []
+                except Exception:
+                    tables = []
+                for table in tables:
+                    if not table:
+                        continue
+                    for row in table:
+                        cells = [re.sub(r"\s+", " ", (cell or "").strip()) for cell in (row or [])]
+                        cells = [c for c in cells if c]
+                        if cells:
+                            pages_text.append(" | ".join(cells))
         return "\n".join(pages_text).strip()
 
     if name.endswith(".docx"):
         doc = Document(BytesIO(content))
-        parts = [(p.text or "").strip() for p in doc.paragraphs]
-        return "\n".join([p for p in parts if p]).strip()
+        parts = []
+        for p in doc.paragraphs:
+            text = re.sub(r"\s+", " ", (p.text or "").strip())
+            if text:
+                parts.append(text)
+        # Extract table rows explicitly; many resumes place company/title/date here.
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [re.sub(r"\s+", " ", (cell.text or "").strip()) for cell in row.cells]
+                cells = [c for c in cells if c]
+                if cells:
+                    parts.append(" | ".join(cells))
+        return "\n".join(parts).strip()
+
+    if name.endswith(".doc"):
+        # Legacy binary DOC support via antiword (installed in Docker image).
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".doc") as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        try:
+            proc = subprocess.run(
+                ["antiword", tmp_path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                timeout=25,
+                check=False,
+            )
+            extracted = (proc.stdout or "").strip()
+            if extracted:
+                return extracted
+            raise ValueError("Could not extract readable text from .doc. Please upload DOCX/PDF/TXT.")
+        except FileNotFoundError:
+            raise ValueError("DOC support unavailable on server. Please upload DOCX/PDF/TXT.")
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     if name.endswith(".txt"):
         return content.decode("utf-8", errors="ignore").strip()
 
-    raise ValueError("Unsupported file format. Please upload PDF, DOCX, or TXT.")
+    raise ValueError("Unsupported file format. Please upload DOC, DOCX, PDF, or TXT.")
 
 
 @app.middleware("http")

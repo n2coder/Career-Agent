@@ -652,7 +652,7 @@
                 <div id="career-tools-section">
                     <p id="career-tools-title" class="text-[10px] font-bold text-slate-300 uppercase px-2 mb-2 tracking-wider">Profile Tools</p>
                     <div id="resume-upload-card" class="mb-3 p-3 rounded-xl border border-blue-100 bg-blue-50/60">
-                        <input id="resumeFileInput" type="file" accept=".pdf,.docx,.txt" class="hidden" />
+                        <input id="resumeFileInput" type="file" accept=".doc,.docx,.pdf,.txt" class="hidden" />
                         <div class="resume-action-row">
                             <button onclick="openResumePicker()" class="resume-upload-btn flex items-center justify-center gap-2">
                                 <i class="fa-solid fa-upload"></i>
@@ -817,15 +817,35 @@
             const step = Math.max(3, Math.floor(fullText.length / 260));
             let i = 0;
             const historyEl = document.getElementById("chat-history");
+            let autoFollow = true;
+            let suppressScrollSignal = false;
+            let ignoreScrollUntil = Date.now() + 160;
+            const onHistoryScroll = () => {
+                if (suppressScrollSignal) return;
+                if (Date.now() < ignoreScrollUntil) return;
+                autoFollow = false;
+            };
+            if (historyEl) {
+                historyEl.addEventListener("scroll", onHistoryScroll, { passive: true });
+            }
 
-            while (i < fullText.length) {
-                i = Math.min(i + step, fullText.length);
-                const partial = fullText.slice(0, i);
-                renderAssistantMarkdown(container, partial);
-                if (historyEl) {
-                    historyEl.scrollTop = historyEl.scrollHeight;
+            try {
+                while (i < fullText.length) {
+                    i = Math.min(i + step, fullText.length);
+                    const partial = fullText.slice(0, i);
+                    renderAssistantMarkdown(container, partial);
+                    if (historyEl && autoFollow) {
+                        suppressScrollSignal = true;
+                        ignoreScrollUntil = Date.now() + 120;
+                        historyEl.scrollTop = historyEl.scrollHeight;
+                        setTimeout(() => { suppressScrollSignal = false; }, 0);
+                    }
+                    await sleep(TYPE_DELAY_MS);
                 }
-                await sleep(TYPE_DELAY_MS);
+            } finally {
+                if (historyEl) {
+                    historyEl.removeEventListener("scroll", onHistoryScroll);
+                }
             }
         }
 
@@ -835,6 +855,18 @@
             const queue = [];
             let finished = false;
             let running = false;
+            let autoFollow = true;
+            let suppressScrollSignal = false;
+            let ignoreScrollUntil = Date.now() + 180;
+            const historyEl = document.getElementById("chat-history");
+            const onHistoryScroll = () => {
+                if (suppressScrollSignal) return;
+                if (Date.now() < ignoreScrollUntil) return;
+                if (!finished) autoFollow = false;
+            };
+            if (historyEl) {
+                historyEl.addEventListener("scroll", onHistoryScroll, { passive: true });
+            }
 
             const splitReadySentences = () => {
                 while (true) {
@@ -854,7 +886,6 @@
             const tick = async () => {
                 if (running) return;
                 running = true;
-                const historyEl = document.getElementById("chat-history");
                 while (!finished || queue.length || pending.length) {
                     splitReadySentences();
                     if (!queue.length) {
@@ -877,13 +908,21 @@
                     if (!front) queue.shift();
                     else queue[0] = front;
                     renderAssistantMarkdown(container, typedText);
-                    if (historyEl) historyEl.scrollTop = historyEl.scrollHeight;
+                    if (historyEl && autoFollow) {
+                        suppressScrollSignal = true;
+                        ignoreScrollUntil = Date.now() + 120;
+                        historyEl.scrollTop = historyEl.scrollHeight;
+                        setTimeout(() => { suppressScrollSignal = false; }, 0);
+                    }
                     await sleep(delay);
                 }
                 if (pending.trim()) {
                     typedText += pending;
                     pending = "";
                     renderAssistantMarkdown(container, typedText);
+                }
+                if (historyEl) {
+                    historyEl.removeEventListener("scroll", onHistoryScroll);
                 }
                 running = false;
             };
@@ -901,6 +940,9 @@
                 },
                 getText() {
                     return String(typedText + pending);
+                },
+                isAutoFollowEnabled() {
+                    return autoFollow;
                 }
             };
         }
@@ -950,7 +992,8 @@
 
         function nudgeToReadablePosition(historyEl) {
             if (!historyEl) return;
-            historyEl.scrollTo({ top: historyEl.scrollHeight, behavior: "smooth" });
+            const instant = document.body.classList.contains("keyboard-open");
+            historyEl.scrollTo({ top: historyEl.scrollHeight, behavior: instant ? "auto" : "smooth" });
         }
 
         function inferThinkingSteps(query, options = {}) {
@@ -1549,7 +1592,8 @@
             composer.style.bottom = `calc(${Math.round(keyboardInset)}px + 0.2rem + env(safe-area-inset-bottom))`;
 
             const composerHeight = composer.getBoundingClientRect().height || 96;
-            history.style.paddingBottom = `${Math.ceil(composerHeight + 18)}px`;
+            // Reserve space for composer + current keyboard lift so in-progress typing stays visible.
+            history.style.paddingBottom = `${Math.ceil(composerHeight + keyboardInset + 18)}px`;
         }
 
         // Initial status check
@@ -1677,6 +1721,9 @@
                     <div id="${loadId}-thinking" class="mt-2 text-xs font-semibold text-slate-500"></div>
                 </div>`;
             history.appendChild(loaderWrap);
+            if (isMobileViewport()) {
+                syncMobileViewportLayout();
+            }
             nudgeToReadablePosition(history);
             const thinkingEl = document.getElementById(`${loadId}-thinking`);
             startThinkingTicker(thinkingEl, inferThinkingSteps(q, { useProfileContext }));
@@ -1737,7 +1784,9 @@
                     contentEl.textContent = "No response generated.";
                     return;
                 }
-                nudgeToReadablePosition(history);
+                if (!typer || typer.isAutoFollowEnabled()) {
+                    nudgeToReadablePosition(history);
+                }
                 if (isMobileViewport()) {
                     mobileInputFocused = true;
                     setTimeout(() => {

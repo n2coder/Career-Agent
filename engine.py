@@ -89,7 +89,11 @@ class RecruitmentEngine:
             "  ## Education\n"
             "  ## Certifications (optional)\n"
             "- Under each section, use bullet points (`- ...`).\n"
-            "- For Experience: each role uses a bold title line then 4-7 bullets with metrics.\n"
+            "- For Experience: each role MUST be its own block in this format:\n"
+            "  ### Role | Company | Duration\n"
+            "  - Impact bullet 1\n"
+            "  - Impact bullet 2\n"
+            "- Never merge multiple roles into one block.\n"
             "- Keep it ATS-friendly: no tables, no icons, no fancy formatting.\n"
             "- Do NOT include 'Why this answer', notes, or extra commentary.\n"
         )
@@ -425,6 +429,128 @@ class RecruitmentEngine:
         cleaned = re.sub(r"```[\s\S]*?```", _unfence, str(text))
         cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
         return cleaned
+
+    def _extract_experience_blocks_for_resume(self, resume_text: str):
+        text = str(resume_text or "")
+        if not text.strip():
+            return []
+        lines = [re.sub(r"\s+", " ", ln).strip() for ln in text.splitlines() if ln.strip()]
+        if not lines:
+            return []
+
+        month = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*"
+        date_range_re = re.compile(
+            rf"(?i)(?:\b{month}\b[\s,./-]*\d{{2,4}}\s*(?:-|–|to)\s*(?:\b{month}\b[\s,./-]*\d{{2,4}}|present|current|till date|till now))|(?:\b\d{{4}}\s*(?:-|–|to)\s*(?:\d{{4}}|present|current))"
+        )
+        section_break_re = re.compile(r"(?i)^(projects?|education|certifications?|skills?|summary|objective|achievements?)\b")
+        bullet_re = re.compile(r"^(?:[-*•]|[0-9]+\.)\s+")
+
+        blocks = []
+        i = 0
+        while i < len(lines):
+            ln = lines[i]
+            if section_break_re.search(ln):
+                i += 1
+                continue
+            if not date_range_re.search(ln):
+                i += 1
+                continue
+
+            duration = ln
+            role = ""
+            company = ""
+            prev = i - 1
+            prev_non_bullets = []
+            while prev >= 0 and len(prev_non_bullets) < 3:
+                pl = lines[prev]
+                if section_break_re.search(pl):
+                    break
+                if not bullet_re.search(pl) and not date_range_re.search(pl):
+                    prev_non_bullets.append(pl)
+                prev -= 1
+            prev_non_bullets = list(reversed(prev_non_bullets))
+            if prev_non_bullets:
+                role = prev_non_bullets[-1]
+            if len(prev_non_bullets) >= 2:
+                company = prev_non_bullets[-2]
+                if company == role:
+                    company = ""
+
+            details = []
+            j = i + 1
+            while j < len(lines):
+                nxt = lines[j]
+                if section_break_re.search(nxt) or date_range_re.search(nxt):
+                    break
+                if len(nxt) >= 3:
+                    details.append(re.sub(r"^(?:[-*•]|[0-9]+\.)\s*", "", nxt).strip())
+                if len(details) >= 8:
+                    break
+                j += 1
+
+            if role or company or duration:
+                blocks.append(
+                    {
+                        "role": role[:120],
+                        "company": company[:160],
+                        "duration": duration[:90],
+                        "details": details[:8],
+                    }
+                )
+            i = max(i + 1, j)
+        return blocks[:12]
+
+    def _format_experience_evidence(self, blocks):
+        if not blocks:
+            return ""
+        out = []
+        for idx, b in enumerate(blocks, 1):
+            out.append(f"{idx}. Role: {b.get('role') or 'TBD'}")
+            if b.get("company"):
+                out.append(f"   Company: {b.get('company')}")
+            if b.get("duration"):
+                out.append(f"   Duration: {b.get('duration')}")
+            for d in (b.get("details") or [])[:6]:
+                out.append(f"   - {d}")
+        return "\n".join(out).strip()
+
+    def _stabilize_experience_section(self, resume_md: str, exp_blocks):
+        text = str(resume_md or "").strip()
+        if not text:
+            return text
+        if not exp_blocks:
+            return text
+
+        m = re.search(r"(?im)^##\s*experience\s*$", text)
+        if not m:
+            return text
+
+        start = m.end()
+        tail = text[start:]
+        next_h = re.search(r"(?im)^##\s+[^\n]+", tail)
+        end = (start + next_h.start()) if next_h else len(text)
+        body = text[start:end].strip()
+
+        # If already well-structured per-role, keep as-is.
+        if body.count("### ") >= max(1, min(2, len(exp_blocks))):
+            return text
+
+        rebuilt = []
+        for b in exp_blocks:
+            role = (b.get("role") or "TBD").strip()
+            company = (b.get("company") or "").strip()
+            duration = (b.get("duration") or "").strip()
+            head = " | ".join([x for x in [role, company, duration] if x])
+            rebuilt.append(f"### {head}")
+            details = [d.strip() for d in (b.get("details") or []) if d.strip()]
+            if not details:
+                details = ["TBD"]
+            for d in details[:6]:
+                rebuilt.append(f"- {d}")
+            rebuilt.append("")
+        rebuilt_body = "\n".join(rebuilt).strip()
+        merged = f"{text[:start].rstrip()}\n\n{rebuilt_body}\n\n{text[end:].lstrip()}".strip()
+        return re.sub(r"\n{3,}", "\n\n", merged).strip()
 
     def _strip_disallowed_disclaimers(self, text):
         if not text:
@@ -1326,7 +1452,10 @@ class RecruitmentEngine:
 
     def _build_resume_output(self, query):
         base_resume = self.resume_text[:9000]
+        base_resume_raw = self.resume_text_raw[:14000] if self.resume_text_raw else self.resume_text[:14000]
         memory = self.resume_memory[-4000:] if self.resume_memory else ""
+        exp_blocks = self._extract_experience_blocks_for_resume(base_resume_raw)
+        exp_evidence = self._format_experience_evidence(exp_blocks)
         prompt = (
             "You are an expert resume writer for India IT market 2026.\n"
             f"Candidate name: {self.resume_name}\n"
@@ -1334,6 +1463,11 @@ class RecruitmentEngine:
             "- Do NOT invent employers, titles, dates, education, certifications, awards, or project names.\n"
             "- If a detail is missing in the original resume context, use a placeholder like `TBD`.\n"
             "- Do NOT invent numeric metrics; only restate metrics that are present in the original resume context.\n"
+            "- In Experience section, keep every role separate with its own company and date range.\n"
+            "- NEVER stack multiple titles/date lines together before bullets.\n"
+            "- For each experience block, use this exact pattern:\n"
+            "  ### Role | Company | Duration\n"
+            "  - Responsibility/impact bullets for that same role only\n"
             "Build a complete ATS-friendly resume in markdown with this structure:\n"
             "1) Name and contact placeholder\n"
             "2) Professional Summary\n"
@@ -1345,6 +1479,8 @@ class RecruitmentEngine:
             "8) Suggested target roles\n"
             "Use concise, quantifiable bullet points. Keep format clean.\n\n"
             f"Original resume context:\n{base_resume}\n\n"
+            f"Raw resume lines (preserve sequencing/context):\n{base_resume_raw}\n\n"
+            f"Structured experience evidence extracted from resume:\n{exp_evidence or 'TBD'}\n\n"
             f"Resume discussion context:\n{memory}\n\n"
             f"Latest user request for tweaks:\n{query}\n\n"
             "Output only the final resume markdown."
@@ -1368,6 +1504,7 @@ class RecruitmentEngine:
             }
         resume_md = self._strip_disallowed_disclaimers(resume_md)
         resume_md = self._normalize_for_resume(resume_md)
+        resume_md = self._stabilize_experience_section(resume_md, exp_blocks)
 
         answer = (
             f"Here is your generated resume draft, **{self.resume_name}**.\n\n"

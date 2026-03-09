@@ -10,6 +10,7 @@ WORKDIR /app
 # Minimal OS packages for common Python wheels/builds.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    antiword \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt
