@@ -818,15 +818,23 @@
             let i = 0;
             const historyEl = document.getElementById("chat-history");
             let autoFollow = true;
-            let suppressScrollSignal = false;
-            let ignoreScrollUntil = Date.now() + 160;
-            const onHistoryScroll = () => {
-                if (suppressScrollSignal) return;
-                if (Date.now() < ignoreScrollUntil) return;
+            let userScrollIntent = false;
+            const onUserScrollIntent = () => {
+                userScrollIntent = true;
                 autoFollow = false;
+            };
+            const onHistoryScroll = () => {
+                if (!historyEl) return;
+                const distanceFromBottom = historyEl.scrollHeight - historyEl.scrollTop - historyEl.clientHeight;
+                if (userScrollIntent || distanceFromBottom > 36) {
+                    autoFollow = false;
+                }
             };
             if (historyEl) {
                 historyEl.addEventListener("scroll", onHistoryScroll, { passive: true });
+                historyEl.addEventListener("wheel", onUserScrollIntent, { passive: true });
+                historyEl.addEventListener("touchmove", onUserScrollIntent, { passive: true });
+                historyEl.addEventListener("pointerdown", onUserScrollIntent, { passive: true });
             }
 
             try {
@@ -835,16 +843,16 @@
                     const partial = fullText.slice(0, i);
                     renderAssistantMarkdown(container, partial);
                     if (historyEl && autoFollow) {
-                        suppressScrollSignal = true;
-                        ignoreScrollUntil = Date.now() + 120;
                         historyEl.scrollTop = historyEl.scrollHeight;
-                        setTimeout(() => { suppressScrollSignal = false; }, 0);
                     }
                     await sleep(TYPE_DELAY_MS);
                 }
             } finally {
                 if (historyEl) {
                     historyEl.removeEventListener("scroll", onHistoryScroll);
+                    historyEl.removeEventListener("wheel", onUserScrollIntent);
+                    historyEl.removeEventListener("touchmove", onUserScrollIntent);
+                    historyEl.removeEventListener("pointerdown", onUserScrollIntent);
                 }
             }
         }
@@ -856,16 +864,24 @@
             let finished = false;
             let running = false;
             let autoFollow = true;
-            let suppressScrollSignal = false;
-            let ignoreScrollUntil = Date.now() + 180;
+            let userScrollIntent = false;
             const historyEl = document.getElementById("chat-history");
-            const onHistoryScroll = () => {
-                if (suppressScrollSignal) return;
-                if (Date.now() < ignoreScrollUntil) return;
+            const onUserScrollIntent = () => {
+                userScrollIntent = true;
                 if (!finished) autoFollow = false;
+            };
+            const onHistoryScroll = () => {
+                if (!historyEl || finished) return;
+                const distanceFromBottom = historyEl.scrollHeight - historyEl.scrollTop - historyEl.clientHeight;
+                if (userScrollIntent || distanceFromBottom > 36) {
+                    autoFollow = false;
+                }
             };
             if (historyEl) {
                 historyEl.addEventListener("scroll", onHistoryScroll, { passive: true });
+                historyEl.addEventListener("wheel", onUserScrollIntent, { passive: true });
+                historyEl.addEventListener("touchmove", onUserScrollIntent, { passive: true });
+                historyEl.addEventListener("pointerdown", onUserScrollIntent, { passive: true });
             }
 
             const splitReadySentences = () => {
@@ -909,10 +925,7 @@
                     else queue[0] = front;
                     renderAssistantMarkdown(container, typedText);
                     if (historyEl && autoFollow) {
-                        suppressScrollSignal = true;
-                        ignoreScrollUntil = Date.now() + 120;
                         historyEl.scrollTop = historyEl.scrollHeight;
-                        setTimeout(() => { suppressScrollSignal = false; }, 0);
                     }
                     await sleep(delay);
                 }
@@ -923,6 +936,9 @@
                 }
                 if (historyEl) {
                     historyEl.removeEventListener("scroll", onHistoryScroll);
+                    historyEl.removeEventListener("wheel", onUserScrollIntent);
+                    historyEl.removeEventListener("touchmove", onUserScrollIntent);
+                    historyEl.removeEventListener("pointerdown", onUserScrollIntent);
                 }
                 running = false;
             };
