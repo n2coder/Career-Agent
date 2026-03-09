@@ -434,15 +434,24 @@ class RecruitmentEngine:
         text = str(resume_text or "")
         if not text.strip():
             return []
-        lines = [re.sub(r"\s+", " ", ln).strip() for ln in text.splitlines() if ln.strip()]
+        lines = [
+            re.sub(r"\s+", " ", ln)
+            .replace("\u2013", "-")
+            .replace("\u2014", "-")
+            .replace("\u2022", "-")
+            .strip()
+            for ln in text.splitlines()
+            if ln.strip()
+        ]
         if not lines:
             return []
 
-        month = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*"
+        month = r"(?:jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)"
         date_range_re = re.compile(
-            rf"(?i)(?:\b{month}\b[\s,./-]*\d{{2,4}}\s*(?:-|–|to)\s*(?:\b{month}\b[\s,./-]*\d{{2,4}}|present|current|till date|till now))|(?:\b\d{{4}}\s*(?:-|–|to)\s*(?:\d{{4}}|present|current))"
+            rf"(?i)(?:\b{month}\b[\s,./-]*\d{{2,4}}\s*(?:-|to)\s*(?:\b{month}\b[\s,./-]*\d{{2,4}}|present|current|till date|till now))|(?:\b\d{{4}}\s*(?:-|to)\s*(?:\d{{4}}|present|current))"
         )
-        section_break_re = re.compile(r"(?i)^(projects?|education|certifications?|skills?|summary|objective|achievements?)\b")
+        section_break_re = re.compile(r"(?i)^(projects?|education|certifications?|skills?|summary|objective|achievements?|target roles?)\b")
+        heading_re = re.compile(r"^###\s+")
         bullet_re = re.compile(r"^(?:[-*•]|[0-9]+\.)\s+")
 
         blocks = []
@@ -459,6 +468,18 @@ class RecruitmentEngine:
             duration = ln
             role = ""
             company = ""
+            pipe_parts = [p.strip() for p in ln.split("|") if p.strip()]
+            if len(pipe_parts) >= 3 and date_range_re.search(pipe_parts[-1]):
+                role = pipe_parts[0]
+                company = pipe_parts[1]
+                duration = " | ".join(pipe_parts[2:])
+            elif len(pipe_parts) == 2:
+                if date_range_re.search(pipe_parts[1]):
+                    role = pipe_parts[0]
+                    duration = pipe_parts[1]
+                elif date_range_re.search(pipe_parts[0]):
+                    duration = pipe_parts[0]
+                    role = pipe_parts[1]
             prev = i - 1
             prev_non_bullets = []
             while prev >= 0 and len(prev_non_bullets) < 3:
@@ -469,9 +490,9 @@ class RecruitmentEngine:
                     prev_non_bullets.append(pl)
                 prev -= 1
             prev_non_bullets = list(reversed(prev_non_bullets))
-            if prev_non_bullets:
+            if prev_non_bullets and not role:
                 role = prev_non_bullets[-1]
-            if len(prev_non_bullets) >= 2:
+            if len(prev_non_bullets) >= 2 and not company:
                 company = prev_non_bullets[-2]
                 if company == role:
                     company = ""
@@ -480,7 +501,7 @@ class RecruitmentEngine:
             j = i + 1
             while j < len(lines):
                 nxt = lines[j]
-                if section_break_re.search(nxt) or date_range_re.search(nxt):
+                if section_break_re.search(nxt) or heading_re.search(nxt) or date_range_re.search(nxt):
                     break
                 if len(nxt) >= 3:
                     details.append(re.sub(r"^(?:[-*•]|[0-9]+\.)\s*", "", nxt).strip())
@@ -531,8 +552,30 @@ class RecruitmentEngine:
         end = (start + next_h.start()) if next_h else len(text)
         body = text[start:end].strip()
 
+        role_heading_re = re.compile(r"^###\s+.+", re.IGNORECASE)
+        bullet_re = re.compile(r"^(?:[-*•]|[0-9]+\.)\s+")
+        heading_count = 0
+        malformed_grouping = False
+        in_role = False
+        saw_bullet_for_current = False
+        for raw in body.splitlines():
+            ln = raw.strip()
+            if not ln:
+                continue
+            if role_heading_re.match(ln):
+                heading_count += 1
+                if in_role and not saw_bullet_for_current:
+                    malformed_grouping = True
+                in_role = True
+                saw_bullet_for_current = False
+                continue
+            if in_role and bullet_re.match(ln):
+                saw_bullet_for_current = True
+        if in_role and not saw_bullet_for_current and heading_count > 1:
+            malformed_grouping = True
+
         # If already well-structured per-role, keep as-is.
-        if body.count("### ") >= max(1, min(2, len(exp_blocks))):
+        if heading_count >= max(1, min(2, len(exp_blocks))) and not malformed_grouping:
             return text
 
         rebuilt = []

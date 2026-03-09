@@ -1453,6 +1453,15 @@
                     continue;
                 }
 
+                if (line.startsWith("### ")) {
+                    if (!current) {
+                        current = { title: "Profile", bullets: [], paragraphs: [] };
+                        parsed.sections.push(current);
+                    }
+                    current.paragraphs.push(cleanMdInline(line.replace(/^#{1,6}\s+/, "")));
+                    continue;
+                }
+
                 if (!parsed.name) {
                     parsed.name = cleanMdInline(line.replace(/^#\s+/, ""));
                     continue;
@@ -1468,8 +1477,8 @@
                     parsed.sections.push(current);
                 }
 
-                if (/^[-*]\s+/.test(line)) {
-                    current.bullets.push(cleanMdInline(line.replace(/^[-*]\s+/, "")));
+                if (/^(?:[-*•]|[0-9]+\.)\s+/.test(line)) {
+                    current.bullets.push(cleanMdInline(line.replace(/^(?:[-*•]|[0-9]+\.)\s+/, "")));
                 } else {
                     current.paragraphs.push(cleanMdInline(line));
                 }
