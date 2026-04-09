@@ -149,7 +149,9 @@ def _client_ip(request: Request):
     if _is_trusted_proxy_source(request):
         xff = request.headers.get("x-forwarded-for", "")
         if xff:
-            return xff.split(",")[0].strip()
+            # Use the rightmost IP — that's the one set by our trusted proxy,
+            # not a value the client can spoof.
+            return xff.split(",")[-1].strip()
     return request.client.host if request.client else "unknown"
 
 

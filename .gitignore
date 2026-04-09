@@ -1,6 +1,9 @@
-# Secrets
+# Secrets — real env files are never committed
 .env
 .env.*
+# …but example/template files are fine to commit
+!.env.example
+!.env.*.example
 
 # Python
 __pycache__/

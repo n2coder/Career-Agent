@@ -10,6 +10,22 @@ from huggingface_hub import InferenceClient
 
 logger = logging.getLogger("career_agent.engine")
 
+# ---------------------------------------------------------------------------
+# Text-size limits for resume/chat buffers and LLM context windows.
+# All values are in characters.
+# ---------------------------------------------------------------------------
+_RESUME_STORE_CHARS = 22_000          # max stored for resume_text / resume_text_raw
+_RESUME_BUILD_CLEAN_CHARS = 9_000     # resume text fed into the resume builder prompt
+_RESUME_BUILD_RAW_CHARS = 14_000      # raw resume (line-break-preserving) fed to builder
+_RESUME_CONTEXT_CHARS = 8_000         # resume slice injected into general-query prompts
+_RESUME_MEMORY_CONTEXT_CHARS = 3_500  # resume-discussion memory injected into prompts
+_RESUME_MEMORY_ANSWER_CHARS = 1_500   # answer excerpt appended to resume_memory buffer
+_RESUME_MEMORY_MAX_CHARS = 12_000     # rolling cap on resume_memory buffer
+_CHAT_CONTEXT_CHARS = 5_000           # chat history slice injected into prompts
+_CHAT_MEMORY_ANSWER_CHARS = 2_200     # answer excerpt appended to chat_memory buffer
+_CHAT_MEMORY_MAX_CHARS = 18_000       # rolling cap on chat_memory buffer
+_LLM_CONTINUATION_CHARS = 5_000       # prior content forwarded in continuation turns
+
 
 class RecruitmentEngine:
     def __init__(self, kb_chunks=None, client=None, kb_token_index=None):
@@ -242,16 +258,23 @@ class RecruitmentEngine:
             return {"uploaded": False, "name": "", "message": "Resume text could not be extracted."}
 
         # Keep a raw version (with line breaks) for evidence-only extraction.
-        self.resume_text_raw = raw[:22000]
-        self.resume_text = clean[:22000]
+        truncated = len(raw) > _RESUME_STORE_CHARS
+        self.resume_text_raw = raw[:_RESUME_STORE_CHARS]
+        self.resume_text = clean[:_RESUME_STORE_CHARS]
         self.resume_name = self._extract_candidate_name(resume_text, filename)
         self.resume_uploaded = True
         self.resume_memory = ""
-        return {
+        result: dict = {
             "uploaded": True,
             "name": self.resume_name,
             "message": f"Hi {self.resume_name}",
         }
+        if truncated:
+            result["warning"] = (
+                "Your resume is very long; only the first portion was analysed. "
+                "Consider trimming it to 2–3 pages for best results."
+            )
+        return result
 
     def _is_resume_related_query(self, query):
         q = (query or "").lower()
@@ -1210,7 +1233,7 @@ class RecruitmentEngine:
                     messages=(
                         messages
                         + [
-                            {"role": "assistant", "content": full_content[-5000:]},
+                            {"role": "assistant", "content": full_content[-_LLM_CONTINUATION_CHARS:]},
                             {
                                 "role": "user",
                                 "content": (
@@ -1311,7 +1334,7 @@ class RecruitmentEngine:
                     "messages": (
                         base_messages
                         + [
-                            {"role": "assistant", "content": full_content[-5000:]},
+                            {"role": "assistant", "content": full_content[-_LLM_CONTINUATION_CHARS:]},
                             {
                                 "role": "user",
                                 "content": (
@@ -1494,8 +1517,8 @@ class RecruitmentEngine:
         return cleaned
 
     def _build_resume_output(self, query):
-        base_resume = self.resume_text[:9000]
-        base_resume_raw = self.resume_text_raw[:14000] if self.resume_text_raw else self.resume_text[:14000]
+        base_resume = self.resume_text[:_RESUME_BUILD_CLEAN_CHARS]
+        base_resume_raw = self.resume_text_raw[:_RESUME_BUILD_RAW_CHARS] if self.resume_text_raw else self.resume_text[:_RESUME_BUILD_RAW_CHARS]
         memory = self.resume_memory[-4000:] if self.resume_memory else ""
         exp_blocks = self._extract_experience_blocks_for_resume(base_resume_raw)
         exp_evidence = self._format_experience_evidence(exp_blocks)
@@ -1601,8 +1624,8 @@ class RecruitmentEngine:
 
             resume_context = (
                 f"Candidate name: {self.resume_name}\n"
-                f"Resume profile context (untrusted reference text):\n{self.resume_text[:8000]}\n\n"
-                f"Previous resume discussion context (untrusted reference text):\n{self.resume_memory[-3500:]}\n\n"
+                f"Resume profile context (untrusted reference text):\n{self.resume_text[:_RESUME_CONTEXT_CHARS]}\n\n"
+                f"Previous resume discussion context (untrusted reference text):\n{self.resume_memory[-_RESUME_MEMORY_CONTEXT_CHARS:]}\n\n"
                 f"{observed_block}"
                 "Personalization rules:\n"
                 "- Tailor advice specifically to the candidate profile.\n"
@@ -1610,7 +1633,7 @@ class RecruitmentEngine:
                 "- For anything not present, phrase it as a suggestion to learn, not as an existing skill.\n"
             )
 
-        conversation_context = self.chat_memory[-5000:] if self.chat_memory else ""
+        conversation_context = self.chat_memory[-_CHAT_CONTEXT_CHARS:] if self.chat_memory else ""
         q_low = query.lower()
         roadmap_mode = bool(re.search(r"\b(roadmap|road map|learning path|study plan|learning plan|study|upskill|upgrade|month|months|week|weeks)\b", q_low))
         analysis_mode = bool(re.search(r"\b(analy(?:ze|sis)|assess(?:ment)?|in depth|deep dive|profile assessment|strengths|gaps|role fit|90\s*[- ]\s*day|action plan)\b", q_low)) and (use_profile_context and self.resume_uploaded)
@@ -1757,10 +1780,10 @@ class RecruitmentEngine:
         if roadmap_mode and (not has_learning_header or not has_md_links):
             answer = f"{answer}\n\n{self._roadmap_learning_resources(query)}".strip()
 
-        self.chat_memory = (f"{self.chat_memory}\n\nUser: {query.strip()}\nAssistant: {answer[:2200]}").strip()[-18000:]
+        self.chat_memory = (f"{self.chat_memory}\n\nUser: {query.strip()}\nAssistant: {answer[:_CHAT_MEMORY_ANSWER_CHARS]}").strip()[-_CHAT_MEMORY_MAX_CHARS:]
 
         if use_profile_context and self.resume_uploaded:
-            self.resume_memory = (f"{self.resume_memory}\n\nUser: {query.strip()}\nAssistant: {answer[:1500]}").strip()[-12000:]
+            self.resume_memory = (f"{self.resume_memory}\n\nUser: {query.strip()}\nAssistant: {answer[:_RESUME_MEMORY_ANSWER_CHARS]}").strip()[-_RESUME_MEMORY_MAX_CHARS:]
             answer = f"{answer}\n\nFor a polished CV based on this discussion, click **Resume Builder**."
 
         sources = [self._source_label(), "LocalKnowledgeBase"]
@@ -1788,7 +1811,7 @@ class RecruitmentEngine:
             obj = self._build_skill_compare_json(payload["resume"], payload["required"])
             # Keep API contract stable: put strict JSON in `answer` so the UI shows only JSON.
             return {
-                "answer": self._to_ascii_punct(__import__("json").dumps(obj, ensure_ascii=True, indent=2)),
+                "answer": self._to_ascii_punct(json.dumps(obj, ensure_ascii=True, indent=2)),
                 "sources": [],
                 "comparison": None,
                 "selected_model": self.llm_provider,
@@ -1943,8 +1966,8 @@ class RecruitmentEngine:
                 )
             resume_context = (
                 f"Candidate name: {self.resume_name}\n"
-                f"Resume profile context (untrusted reference text):\n{self.resume_text[:8000]}\n\n"
-                f"Previous resume discussion context (untrusted reference text):\n{self.resume_memory[-3500:]}\n\n"
+                f"Resume profile context (untrusted reference text):\n{self.resume_text[:_RESUME_CONTEXT_CHARS]}\n\n"
+                f"Previous resume discussion context (untrusted reference text):\n{self.resume_memory[-_RESUME_MEMORY_CONTEXT_CHARS:]}\n\n"
                 f"{observed_block}"
                 "Personalization rules:\n"
                 "- Tailor advice specifically to the candidate profile.\n"
@@ -1952,7 +1975,7 @@ class RecruitmentEngine:
                 "- For anything not present, phrase it as a suggestion to learn, not as an existing skill.\n"
             )
 
-        conversation_context = self.chat_memory[-5000:] if self.chat_memory else ""
+        conversation_context = self.chat_memory[-_CHAT_CONTEXT_CHARS:] if self.chat_memory else ""
         q_low = query.lower()
         roadmap_mode = bool(re.search(r"\b(roadmap|road map|learning path|study plan|learning plan|study|upskill|upgrade|month|months|week|weeks)\b", q_low))
         analysis_mode = bool(re.search(r"\b(analy(?:ze|sis)|assess(?:ment)?|in depth|deep dive|profile assessment|strengths|gaps|role fit|90\s*[- ]\s*day|action plan)\b", q_low)) and (use_profile_context and self.resume_uploaded)
@@ -2098,9 +2121,9 @@ class RecruitmentEngine:
         if roadmap_mode and (not has_learning_header or not has_md_links):
             answer = f"{answer}\n\n{self._roadmap_learning_resources(query)}".strip()
 
-        self.chat_memory = (f"{self.chat_memory}\n\nUser: {query.strip()}\nAssistant: {answer[:2200]}").strip()[-18000:]
+        self.chat_memory = (f"{self.chat_memory}\n\nUser: {query.strip()}\nAssistant: {answer[:_CHAT_MEMORY_ANSWER_CHARS]}").strip()[-_CHAT_MEMORY_MAX_CHARS:]
         if use_profile_context and self.resume_uploaded:
-            self.resume_memory = (f"{self.resume_memory}\n\nUser: {query.strip()}\nAssistant: {answer[:1500]}").strip()[-12000:]
+            self.resume_memory = (f"{self.resume_memory}\n\nUser: {query.strip()}\nAssistant: {answer[:_RESUME_MEMORY_ANSWER_CHARS]}").strip()[-_RESUME_MEMORY_MAX_CHARS:]
             answer = f"{answer}\n\nFor a polished CV based on this discussion, click **Resume Builder**."
 
         sources = [self._source_label(), "LocalKnowledgeBase"]
