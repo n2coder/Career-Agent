@@ -4,6 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
 ENV WEB_CONCURRENCY=1
+ENV PORT=8001
 
 WORKDIR /app
 
@@ -23,4 +24,4 @@ USER appuser
 
 EXPOSE 8001
 
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port 8001 --workers ${WEB_CONCURRENCY}"]
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8001} --workers ${WEB_CONCURRENCY}"]

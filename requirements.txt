@@ -8,3 +8,9 @@ python-docx
 requests
 wheel>=0.46.3
 jaraco.context>=6.1.0
+openai>=1.0.0
+deepgram-sdk>=6.0.0
+redis[asyncio]>=5.0.0
+PyJWT>=2.0.0
+aiortc>=1.9.0
+pydantic-settings>=2.0.0

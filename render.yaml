@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: career-agent
+    env: docker
+    plan: free
+    autoDeploy: true
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: WEB_CONCURRENCY
+        value: 1
+      - key: API_KEY_REQUIRED
+        value: "true"
+      - key: DISABLE_DOCS
+        value: "true"
+      - key: ALLOW_NULL_ORIGIN
+        value: "false"
+      - key: MONITORING_KEY_REQUIRED
+        value: "true"
+      - key: LLM_PROVIDER
+        value: openai
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: APP_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MONITORING_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: TRUST_X_FORWARDED_FOR
+        value: "true"
+      - key: TRUSTED_PROXY_IPS
+        sync: false

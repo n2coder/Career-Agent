@@ -10,6 +10,7 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="/static/voice-client.js"></script>
 
     <style>
         :root {
@@ -105,6 +106,17 @@
             color: #fff;
         }
         .send-btn:hover { background: var(--hover-accent); }
+        .voice-btn {
+            background: var(--bg-base);
+            border: 1px solid var(--border-light);
+            color: var(--accent-secondary);
+            flex-shrink: 0;
+        }
+        .voice-btn:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
+        .voice-btn-active { background: #eff6ff !important; border-color: var(--accent-primary) !important; color: var(--accent-primary) !important; }
+        .voice-btn-recording { background: #fff1f2 !important; border-color: #f43f5e !important; color: #f43f5e !important; }
+        .voice-btn-speaking { background: #f0fdf4 !important; border-color: #22c55e !important; color: #22c55e !important; }
+        #voice-status { font-size: 0.72rem; color: var(--accent-secondary); padding: 0 1rem 0.25rem; }
 
         .ai-response p { margin: 0.35rem 0 0.7rem; line-height: 1.7; }
         .ai-response h1, .ai-response h2, .ai-response h3 {
@@ -706,13 +718,16 @@
         </div>
 
         <div class="composer-wrap p-6 lg:p-10 pt-0">
+            <div id="voice-status" style="display:none;"></div>
             <div class="chat-input-shell flex items-center gap-2 p-2 rounded-3xl shadow-inner">
                 <input type="text" id="userInput" class="flex-1 bg-transparent px-6 py-4 text-sm outline-none placeholder:text-slate-300" placeholder="Ask Lin.O..." onkeydown="if(event.key === 'Enter'){event.preventDefault();handleChat();}">
                 <button onclick="handleChat()" class="send-btn h-14 w-14 rounded-2xl flex items-center justify-center text-white shadow-lg transition-all hover:scale-105 active:scale-95">
                     <i class="fa-solid fa-paper-plane"></i>
                 </button>
+                <button id="voice-btn" onclick="toggleVoice()" class="voice-btn h-14 w-14 rounded-2xl flex items-center justify-center shadow-lg transition-all hover:scale-105 active:scale-95" title="Voice mode">
+                    <i class="fa-solid fa-microphone"></i>
+                </button>
             </div>
-            
         </div>
     </main>
 
@@ -1876,6 +1891,140 @@
             } catch(e) {
                 stopThinkingTicker();
                 document.getElementById(loadId).innerHTML = `<div class="p-4 bg-red-50 text-red-500 rounded-2xl text-xs font-bold">Network error: Ensure main.py is running.</div>`;
+            }
+        }
+
+        // ----------------------------------------------------------------
+        // Voice mode
+        // ----------------------------------------------------------------
+        let _voiceClient = null;
+        let _voiceActive = false;
+        let _voiceResponseEl = null;
+        let _voiceResponseBuffer = "";
+        let _voiceTurnId = 0;
+
+        function _voiceWsUrl() {
+            return API_BASE.replace(/^http/, "ws") + "/ws/voice";
+        }
+
+        function _setVoiceStatus(text) {
+            const el = document.getElementById("voice-status");
+            if (!el) return;
+            el.textContent = text;
+            el.style.display = text ? "" : "none";
+        }
+
+        function _updateVoiceBtn(status) {
+            const btn = document.getElementById("voice-btn");
+            if (!btn) return;
+            btn.classList.toggle("voice-btn-active",   _voiceActive && !["stopped","disconnected"].includes(status));
+            btn.classList.toggle("voice-btn-recording", status === "recording");
+            btn.classList.toggle("voice-btn-speaking",  status === "speaking");
+            const icon = btn.querySelector("i");
+            if (!icon) return;
+            if (status === "processing")      icon.className = "fa-solid fa-circle-notch fa-spin";
+            else if (status === "speaking")   icon.className = "fa-solid fa-volume-high";
+            else if (status === "recording")  icon.className = "fa-solid fa-circle";
+            else                              icon.className = "fa-solid fa-microphone";
+        }
+
+        function _voiceAppendUserBubble(text) {
+            const history = document.getElementById("chat-history");
+            const wrap = document.createElement("div");
+            wrap.className = "flex justify-end";
+            const bubble = document.createElement("div");
+            bubble.className = "user-bubble";
+            bubble.textContent = text;
+            wrap.appendChild(bubble);
+            history.appendChild(wrap);
+            nudgeToReadablePosition(history);
+            _voiceResponseEl = null;
+            _voiceResponseBuffer = "";
+            _voiceTurnId++;
+        }
+
+        function _voiceEnsureResponseBubble() {
+            if (_voiceResponseEl) return _voiceResponseEl;
+            const id = "voice-resp-" + _voiceTurnId;
+            const history = document.getElementById("chat-history");
+            const wrap = document.createElement("div");
+            wrap.className = "flex items-start gap-4";
+            wrap.innerHTML =
+                `<div class="avatar-box scale-90 shrink-0"><div class="eyes"><div class="eye"></div><div class="eye"></div></div><div class="nose"></div></div>` +
+                `<div class="assistant-bubble ai-response p-5 rounded-3xl rounded-tl-none max-w-[85%] text-sm leading-relaxed" id="${id}"></div>`;
+            history.appendChild(wrap);
+            _voiceResponseEl = wrap.querySelector(`#${id}`);
+            nudgeToReadablePosition(history);
+            return _voiceResponseEl;
+        }
+
+        async function toggleVoice() {
+            if (_voiceActive) {
+                _voiceActive = false;
+                if (_voiceClient) { _voiceClient.stop(); _voiceClient = null; }
+                _updateVoiceBtn("stopped");
+                _setVoiceStatus("");
+                return;
+            }
+
+            if (typeof VoiceClient === "undefined") {
+                _setVoiceStatus("Voice not available — reload page.");
+                return;
+            }
+
+            _voiceActive = true;
+            _updateVoiceBtn("starting");
+            _setVoiceStatus("Requesting microphone...");
+
+            try {
+                _voiceClient = new VoiceClient({
+                    wsUrl: _voiceWsUrl(),
+                    vadWorkletUrl: "/static/vad-worklet.js",
+                    onStatusChange(status) {
+                        if (!_voiceActive) return;
+                        _updateVoiceBtn(status);
+                        const labels = {
+                            calibrating: "Calibrating mic...",
+                            listening:   "Listening — speak now",
+                            recording:   "Recording...",
+                            processing:  "Thinking...",
+                            speaking:    "Lin.O speaking...",
+                            muted:       "Muted",
+                            disconnected:"Reconnecting...",
+                        };
+                        _setVoiceStatus(labels[status] || "");
+                    },
+                    onTurnStarted(transcript) {
+                        if (transcript) _voiceAppendUserBubble(transcript);
+                    },
+                    onTextDelta(delta) {
+                        _voiceResponseBuffer += delta;
+                        const el = _voiceEnsureResponseBubble();
+                        el.textContent = _voiceResponseBuffer;
+                        nudgeToReadablePosition(document.getElementById("chat-history"));
+                    },
+                    onTurnEnd(text) {
+                        const el = _voiceEnsureResponseBubble();
+                        const final = text || _voiceResponseBuffer;
+                        if (final) el.innerHTML = DOMPurify.sanitize(marked.parse(final));
+                        _voiceResponseEl = null;
+                        _voiceResponseBuffer = "";
+                        nudgeToReadablePosition(document.getElementById("chat-history"));
+                    },
+                    onError(msg) {
+                        _setVoiceStatus("Voice error — check console.");
+                        console.error("VoiceClient error:", msg);
+                    },
+                });
+                await _voiceClient.start();
+            } catch (e) {
+                _voiceActive = false;
+                _voiceClient = null;
+                _updateVoiceBtn("stopped");
+                _setVoiceStatus(e && e.name === "NotAllowedError"
+                    ? "Microphone permission denied."
+                    : "Could not start voice mode.");
+                console.error("Voice start error:", e);
             }
         }
     </script>

@@ -1,4 +1,5 @@
 from io import BytesIO
+import asyncio
 import os
 import time
 import json
@@ -11,12 +12,13 @@ import threading
 import ipaddress
 import subprocess
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
 from collections import defaultdict, deque
 
 import pdfplumber
 from docx import Document
-from fastapi import FastAPI, File, Request, UploadFile
+from fastapi import FastAPI, File, Request, UploadFile, WebSocket
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
@@ -24,13 +26,44 @@ from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from engine import RecruitmentEngine
+from voice_engine.config import VoiceSettings as VoiceSettings
+from voice_engine.pipeline import VoicePipeline, VoiceServices
 import uvicorn
 
 DISABLE_DOCS = (os.getenv("DISABLE_DOCS", "true").strip().lower() in {"1", "true", "yes"})
+
+# Voice engine — initialised once at startup, None if voice deps are missing.
+_voice_services: VoiceServices | None = None
+_voice_audio_dir = Path(__file__).resolve().with_name("static") / "audio"
+_voice_static_dir = Path(__file__).resolve().with_name("voice_engine") / "static"
+
+
+@asynccontextmanager
+async def lifespan(app):
+    global _voice_services
+    try:
+        _voice_audio_dir.mkdir(parents=True, exist_ok=True)
+        _voice_settings = VoiceSettings()
+        _voice_services = VoiceServices.build(_voice_settings)
+        await _voice_services.startup()
+        logging.getLogger("career_agent.api").info("voice_services_started stt=%s", _voice_settings.stt_provider)
+    except Exception:
+        logging.getLogger("career_agent.api").warning(
+            "Voice services could not be initialised — /ws/voice will be unavailable", exc_info=True
+        )
+    yield
+    if _voice_services:
+        try:
+            await _voice_services.shutdown()
+        except Exception:
+            pass
+
+
 app = FastAPI(
     docs_url=None if DISABLE_DOCS else "/docs",
     redoc_url=None if DISABLE_DOCS else "/redoc",
     openapi_url=None if DISABLE_DOCS else "/openapi.json",
+    lifespan=lifespan,
 )
 
 LOG_LEVEL = (os.getenv("LOG_LEVEL", "INFO") or "INFO").upper()
@@ -98,6 +131,7 @@ _sessions = {}  # session_key -> (RecruitmentEngine, last_seen_epoch)
 _index_html = Path(__file__).resolve().with_name("index.html")
 _assets_dir = Path(__file__).resolve().with_name("assets")
 _assets_dir.mkdir(exist_ok=True)
+_voice_audio_dir.mkdir(parents=True, exist_ok=True)
 _app_started_at = time.time()
 _monitor_lock = threading.Lock()
 _monitor_unique_visitors = set()
@@ -108,6 +142,10 @@ _monitor_resume_build_events = deque(maxlen=MONITORING_MAX_RESUME_BUILDS)
 _rate_last_cleanup = 0.0
 
 app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
+# Voice: audio cache (more specific path must be mounted first)
+app.mount("/static/audio", StaticFiles(directory=str(_voice_audio_dir)), name="voice-audio")
+# Voice: JS files (vad-worklet.js, voice-client.js)
+app.mount("/static", StaticFiles(directory=str(_voice_static_dir)), name="voice-static")
 
 
 def _is_ip_in_allowlist(ip_text: str, allowlist=None) -> bool:
@@ -477,7 +515,7 @@ async def add_request_context(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
-    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(self), camera=()"
     logger.info(
         "request request_id=%s method=%s path=%s status=%s duration_ms=%s ip=%s",
         request_id,
@@ -857,6 +895,91 @@ async def query_stream_endpoint(request: Request):
         return JSONResponse(status_code=500, content={"error": "Request processing failed.", "request_id": req_id})
 
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+async def _career_voice_stream(engine: RecruitmentEngine, query: str):
+    """Wrap the sync streaming engine as an async generator for VoicePipeline."""
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
 
+    def _producer():
+        try:
+            for event in engine.get_ai_response_stream(
+                query, use_profile_context=True, resume_builder=False
+            ):
+                if isinstance(event, str) and event:
+                    loop.call_soon_threadsafe(queue.put_nowait, event)
+                elif isinstance(event, dict):
+                    t = event.get("type")
+                    if t == "chunk":
+                        txt = str(event.get("text") or "")
+                        if txt:
+                            loop.call_soon_threadsafe(queue.put_nowait, txt)
+                    elif t == "done":
+                        ans = str((event.get("result") or {}).get("answer") or "")
+                        if ans:
+                            loop.call_soon_threadsafe(queue.put_nowait, ans)
+                        break
+                    elif t == "error":
+                        break
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+
+    threading.Thread(target=_producer, daemon=True).start()
+    while True:
+        chunk = await queue.get()
+        if chunk is None:
+            break
+        yield chunk
+
+
+@app.websocket("/ws/voice")
+async def voice_ws(websocket: WebSocket):
+    if _voice_services is None:
+        await websocket.close(code=1011, reason="Voice services unavailable")
+        return
+
+    # Optional API key check via query param: ws://host/ws/voice?api_key=xxx
+    if API_KEY_REQUIRED:
+        key = (websocket.query_params.get("api_key") or "").strip()
+        if not API_KEY or not secrets.compare_digest(API_KEY, key):
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
+
+    await websocket.accept()
+
+    # Each WebSocket connection gets its own engine (mirrors HTTP session behaviour).
+    engine = RecruitmentEngine.from_base(_base_engine)
+    _engine_history_seeded = False
+
+    async def career_voice_handler(query: str, history: list, lang: str):
+        nonlocal _engine_history_seeded
+        # On first turn, pre-seed engine chat_memory from Redis history (supports reconnect).
+        if not _engine_history_seeded and history:
+            _engine_history_seeded = True
+            pairs = []
+            for i in range(0, len(history) - 1, 2):
+                u = history[i] if history[i].get("role") == "user" else None
+                a = history[i + 1] if i + 1 < len(history) and history[i + 1].get("role") == "assistant" else None
+                if u and a:
+                    pairs.append(f"User: {u['content'].strip()}\nAssistant: {a['content'].strip()}")
+            if pairs:
+                engine.chat_memory = "\n\n".join(pairs)[-18_000:]
+        _engine_history_seeded = True
+
+        effective_query = query
+        if lang == "hi":
+            effective_query = query + " [कृपया हिंदी या हिंग्लिश में जवाब दें]"
+        return _career_voice_stream(engine, effective_query)
+
+    pipeline = VoicePipeline(
+        services=_voice_services,
+        on_query=career_voice_handler,
+        greeting=(
+            "Hi! I'm Lin.O, your AI career guide for the Indian job market. "
+            "You can ask me about salaries, roadmaps, skill upgrades, or your resume. What's on your mind?"
+        ),
+    )
+    await pipeline.run(websocket)
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8001")))
